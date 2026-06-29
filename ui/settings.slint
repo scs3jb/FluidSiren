@@ -1,0 +1,128 @@
+// Settings window. In-out properties are seeded from Config by Rust and read
+// back on Save. The `save` and `close-requested` callbacks are wired in Rust.
+
+import { LineEdit, CheckBox, ComboBox, Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component Settings inherits Window {
+    in-out property <string> whisper-model: "base.en";
+    in-out property <string> language: "en";
+    in-out property <bool> enhance: false;
+    in-out property <string> ollama-model: "llama3.2:3b";
+    in-out property <string> ollama-url: "http://localhost:11434";
+    in-out property <string> hotkey-key: "KEY_F12";
+    // True while the capture box is focused and waiting for a keypress.
+    in-out property <bool> capturing: false;
+
+    callback save();
+    callback close-requested();
+    // Emitted with an evdev key name (e.g. "KEY_F12") when the user presses a key
+    // in the capture box.
+    callback captured(string);
+
+    title: "FluidSiren — Settings";
+    width: 460px;
+    height: 560px;
+    background: #1e1e2e;
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 12px;
+
+        Text {
+            text: "FluidSiren Settings";
+            color: #cdd6f4;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        Text { text: "Whisper model"; color: #a6adc8; font-size: 13px; }
+        // Quick-pick presets; selecting one writes the free-text field below.
+        ComboBox {
+            model: ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"];
+            selected(value) => { root.whisper-model = value; }
+        }
+        LineEdit {
+            text <=> root.whisper-model;
+            placeholder-text: "e.g. base.en, or any whisper.cpp ggml name";
+        }
+
+        Text { text: "Language"; color: #a6adc8; font-size: 13px; }
+        LineEdit {
+            text <=> root.language;
+            placeholder-text: "en, auto, de, fr, …";
+        }
+
+        CheckBox {
+            text: "Enhance transcript with Ollama";
+            checked <=> root.enhance;
+        }
+
+        Text { text: "Ollama model"; color: #a6adc8; font-size: 13px; }
+        LineEdit { text <=> root.ollama-model; }
+
+        Text { text: "Ollama URL"; color: #a6adc8; font-size: 13px; }
+        LineEdit { text <=> root.ollama-url; }
+
+        Text {
+            text: "Dictation hotkey — click the box, then press a function key (F1–F12)";
+            color: #a6adc8;
+            font-size: 13px;
+        }
+        fs := FocusScope {
+            height: 42px;
+            key-pressed(event) => {
+                if (event.text == Key.F1) { root.captured("KEY_F1"); }
+                else if (event.text == Key.F2) { root.captured("KEY_F2"); }
+                else if (event.text == Key.F3) { root.captured("KEY_F3"); }
+                else if (event.text == Key.F4) { root.captured("KEY_F4"); }
+                else if (event.text == Key.F5) { root.captured("KEY_F5"); }
+                else if (event.text == Key.F6) { root.captured("KEY_F6"); }
+                else if (event.text == Key.F7) { root.captured("KEY_F7"); }
+                else if (event.text == Key.F8) { root.captured("KEY_F8"); }
+                else if (event.text == Key.F9) { root.captured("KEY_F9"); }
+                else if (event.text == Key.F10) { root.captured("KEY_F10"); }
+                else if (event.text == Key.F11) { root.captured("KEY_F11"); }
+                else if (event.text == Key.F12) { root.captured("KEY_F12"); }
+                else { return reject; }
+                root.capturing = false;
+                return accept;
+            }
+            Rectangle {
+                border-radius: 6px;
+                border-width: 2px;
+                border-color: root.capturing ? #f9e2af : #585b70;
+                background: #313244;
+                Text {
+                    text: root.capturing ? "Press a function key…" : root.hotkey-key;
+                    color: root.capturing ? #f9e2af : #cdd6f4;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                clicked => {
+                    fs.focus();
+                    root.capturing = true;
+                }
+            }
+        }
+
+        // Push the buttons to the bottom.
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalBox {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: "Cancel";
+                clicked => { root.close-requested(); }
+            }
+            Button {
+                text: "Save";
+                primary: true;
+                clicked => { root.save(); }
+            }
+        }
+    }
+}

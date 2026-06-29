@@ -1,0 +1,71 @@
+// Live dictation overlay: a small, frameless, always-on-top card shown while
+// recording / transcribing. Driven entirely from Rust via the `status`,
+// `state-kind` and `transcript` properties (updated on the Slint event-loop
+// thread from EngineEvent).
+
+export component Overlay inherits Window {
+    // Human-readable status line ("Recording", "Transcribing…", "Idle", "Error").
+    in property <string> status: "Idle";
+    // 0 = idle/done, 1 = recording, 2 = processing. Drives the status dot colour.
+    in property <int> state-kind: 0;
+    // Latest transcript (or error) text.
+    in property <string> transcript: "";
+    // Collapses the window to 1×1 when false. Live resize of a mapped window does
+    // not work on Wayland/winit here, so for now the overlay stays 1×1 (an
+    // invisible event-loop keepalive); a visible live preview needs a layer-shell
+    // or separate-process approach (future work).
+    in property <bool> shown: false;
+
+    title: "FluidSiren";
+    // Frameless: no titlebar / window decorations.
+    no-frame: true;
+    width: root.shown ? 380px : 1px;
+    height: root.shown ? 132px : 1px;
+    // Solid dark backdrop (robust on every compositor; see README caveat about
+    // transparent rounded corners on Wayland).
+    background: #11111b;
+
+    Rectangle {
+        background: #1e1e2e;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: #313244;
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+
+                // Status dot. Fixed size so the layout doesn't stretch it.
+                Rectangle {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: root.state-kind == 1 ? #f38ba8     // recording  → red
+                              : root.state-kind == 2 ? #f9e2af     // processing → amber
+                              : #a6e3a1;                            // idle/done  → green
+                }
+
+                Text {
+                    text: root.status;
+                    color: #cdd6f4;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                text: root.transcript == "" ? "Listening…" : root.transcript;
+                color: #bac2de;
+                font-size: 13px;
+                wrap: word-wrap;
+                horizontal-alignment: left;
+                vertical-alignment: top;
+            }
+        }
+    }
+}

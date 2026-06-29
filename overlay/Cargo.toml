@@ -1,0 +1,16 @@
+[package]
+name = "fluidsiren-overlay"
+version = "0.1.0"
+edition = "2021"
+description = "FluidSiren recording overlay (GTK4 + wlr-layer-shell)"
+license = "GPL-3.0-only"
+
+[[bin]]
+name = "fluidsiren-overlay"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = "0.9"
+gtk4-layer-shell = "0.5"
+async-channel = "2"
+cpal = "0.15"

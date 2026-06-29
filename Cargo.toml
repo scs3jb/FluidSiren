@@ -1,0 +1,49 @@
+[package]
+name = "fluidsiren"
+version = "0.1.0"
+edition = "2021"
+description = "FluidSiren for Linux — local voice-to-text dictation (Wayland/Plasma)"
+license = "GPL-3.0-only"
+
+[[bin]]
+name = "fluidsiren"
+path = "src/main.rs"
+
+[features]
+# CPU build is the default and works everywhere. GPU backends are opt-in per machine.
+default = []
+cuda = ["whisper-rs/cuda"]       # Nvidia desktop
+vulkan = ["whisper-rs/vulkan"]   # AMD GPU
+openblas = ["whisper-rs/openblas"]
+
+[dependencies]
+whisper-rs = { version = "0.14", default-features = false }
+cpal = "0.15"
+# Use ashpd's async-std (async-io) path, NOT tokio: ksni (via Slint's tray) forces
+# zbus onto async-io, and a mixed tokio+async-io zbus panics ("no reactor running")
+# when ksni makes a blocking call off the tokio runtime. This keeps zbus async-io only.
+ashpd = { version = "0.12", default-features = false, features = ["async-std"] }   # XDG GlobalShortcuts portal (KDE)
+evdev = "0.12"   # raw /dev/input push-to-talk fallback
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+directories = "5"
+hound = "3"
+slint = "1.8"
+# ksni must use async-io (matching Slint's system-tray feature), NOT tokio —
+# ksni hard-errors at compile time if both backends are enabled.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+slint-build = "1.8"
+
+[workspace]
+members = ["overlay"]
+# Build both the app and the overlay binary with a plain `cargo build`.
+default-members = [".", "overlay"]
