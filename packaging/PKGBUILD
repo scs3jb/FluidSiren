@@ -1,0 +1,33 @@
+# Maintainer: scs3jb
+pkgname=fluidsiren
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Local voice-to-text dictation for Wayland/KDE Plasma"
+arch=('x86_64')
+url="https://github.com/scs3jb/FluidSiren"
+license=('GPL-3.0-only')
+depends=('gtk4' 'gtk4-layer-shell' 'pipewire' 'ydotool')
+makedepends=('rust' 'cargo' 'cmake' 'gcc')
+optdepends=('ollama: local LLM transcript cleanup')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "FluidSiren-$pkgver"
+    # GPU backends: add --features cuda (Nvidia) or --features vulkan (AMD).
+    cargo build --release --locked
+}
+
+check() {
+    cd "FluidSiren-$pkgver"
+    cargo test --release --locked --bin fluidsiren
+}
+
+package() {
+    cd "FluidSiren-$pkgver"
+    install -Dm755 target/release/fluidsiren "$pkgdir/usr/bin/fluidsiren"
+    install -Dm755 target/release/fluidsiren-overlay "$pkgdir/usr/bin/fluidsiren-overlay"
+    install -Dm644 packaging/dev.altic.FluidSiren.desktop \
+        "$pkgdir/usr/share/applications/dev.altic.FluidSiren.desktop"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

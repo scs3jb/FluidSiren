@@ -15,22 +15,18 @@ waveform overlay. Nothing leaves your machine.
 - **Optional cleanup** — local LLM via Ollama fixes punctuation/casing/fillers; degrades gracefully if absent.
 - **Tray + overlay** — KDE StatusNotifierItem tray; a bottom-center GTK4 `layer-shell` pill with a live mic waveform while recording.
 
-## Quick start
+## Install
 
 ```bash
-# 1. Build (also builds the fluidsiren-overlay binary)
-cargo build --release
-
-# 2. Install the desktop file so the KDE GlobalShortcuts portal can identify the app
-install -Dm644 packaging/dev.altic.FluidSiren.desktop \
-  ~/.local/share/applications/dev.altic.FluidSiren.desktop
-sed -i "s|^Exec=.*|Exec=$(pwd)/target/release/fluidsiren|" \
-  ~/.local/share/applications/dev.altic.FluidSiren.desktop
-update-desktop-database ~/.local/share/applications 2>/dev/null || true
-
-# 3. Run (lives in the system tray)
-cargo run --release
+git clone https://github.com/scs3jb/FluidSiren && cd FluidSiren
+scripts/install.sh                 # CPU; or: scripts/install.sh cuda | vulkan
+ENABLE_AUTOSTART=1 scripts/install.sh   # …and start at login
+fluidsiren                         # runs in the system tray
 ```
+
+`install.sh` builds both binaries into `~/.local/bin` and installs the desktop
+entry (required for the hotkey portal). For a system package on Arch, see
+[`packaging/PKGBUILD`](packaging/PKGBUILD).
 
 On first run it downloads a Whisper model (`base.en`, ~142 MB) to
 `~/.local/share/fluidsiren/models/`. Config is `~/.config/fluidsiren/config.toml`.
