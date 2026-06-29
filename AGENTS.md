@@ -20,7 +20,8 @@ src/
   engine.rs      DictationEngine — actor thread owning the cpal stream + whisper ctx;
                  capture→transcribe→enhance→inject pipeline; Clone+Send handle
   audio.rs       cpal capture + resample to 16 kHz mono; --file/--seconds helpers
-  asr.rs         Whisper provider (whisper-rs) + ggml model download
+  asr.rs         Transcriber trait + Whisper provider (whisper-rs) + load_transcriber factory
+  parakeet.rs    Parakeet TDT (NeMo) provider via sherpa-onnx (feature "parakeet", English)
   enhance.rs     Ollama cleanup pass (graceful fallback if absent)
   inject.rs      ydotool text injection (+ FLUIDSIREN_NO_INJECT kill-switch)
   hotkey.rs      global hotkey: portal (ashpd) self-bind + evdev fallback; live re-bind

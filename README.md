@@ -4,12 +4,12 @@
 > from-scratch successor to **plasma-s2t-whisperx** — a leaner, native take that
 > replaces and improves on it. Because Linux deserves nice things too.
 
-Local, private voice-to-text dictation for **Wayland / KDE Plasma**. Press a
-hotkey, talk, and your speech is transcribed on-device with Whisper and typed into
-whatever window is focused — with an optional local-LLM cleanup pass and a live
-waveform overlay. Nothing leaves your machine.
+Local, private **English** voice-to-text dictation for **Wayland / KDE Plasma**.
+Press a hotkey, talk, and your speech is transcribed on-device (Whisper or
+Parakeet) and typed into whatever window is focused — with an optional local-LLM
+cleanup pass and a live waveform overlay. Nothing leaves your machine.
 
-- **On-device ASR** — **Whisper** (multilingual, `whisper.cpp`) or **Parakeet TDT** (fast, accurate English; NVIDIA NeMo via sherpa-onnx). Pick in Settings. CPU by default; CUDA / Vulkan opt-in.
+- **On-device ASR** — **Parakeet TDT** (fast, accurate English; NVIDIA NeMo via sherpa-onnx) or **Whisper** (`whisper.cpp`). Pick in Settings. CPU by default; CUDA / Vulkan opt-in.
 - **Global hotkey** — self-binds on startup via the XDG GlobalShortcuts portal (KDE), rebindable from Settings; optional direct evdev key with push-to-talk.
 - **Types into any app** — via `ydotool` (uinput), which works under KWin.
 - **Optional cleanup** — local LLM via Ollama fixes punctuation/casing/fillers; degrades gracefully if absent.
@@ -100,15 +100,17 @@ app picks up changes (enhancement, hotkey) live.
 
 ## Speech models
 
-- **Whisper** (default) — `whisper.cpp`, multilingual, sizes from `tiny` to `large-v3`.
-- **Parakeet TDT 0.6B v2** — NVIDIA NeMo transducer via sherpa-onnx; fast and very
+FluidSiren is focused on **English** dictation, with two on-device providers:
+
+- **Whisper** (default) — `whisper.cpp`; `.en` models from `tiny.en` to `medium.en`
+  are fast and English-only, `large-v3` is the most accurate.
+- **Parakeet TDT 0.6B v2** — NVIDIA NeMo transducer via sherpa-onnx; very fast and
   accurate for English. ~460 MB int8 model, downloaded on first use to
   `~/.local/share/fluidsiren/models/`. Select **parakeet** in Settings.
 
-The transcriber is a pluggable trait, so more models slot in behind it. Nemotron
-(NeMo) would follow the same sherpa-onnx path once an ONNX export is published;
-Cohere's ASR isn't available in this runtime yet. Build without Parakeet (smaller,
-no sherpa-onnx) via `cargo build --release --no-default-features`.
+The transcriber is a small pluggable trait (`asr::Transcriber`), so adding a
+provider is straightforward. Build without Parakeet (smaller binary, no
+sherpa-onnx) via `cargo build --release --no-default-features`.
 
 ## License
 
