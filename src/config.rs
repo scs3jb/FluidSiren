@@ -22,7 +22,7 @@ pub struct Config {
     pub hotkey_backend: String,
     /// Hotkey trigger mode: "toggle" | "push_to_talk".
     pub hotkey_mode: String,
-    /// evdev key name (evdev backend only), e.g. "KEY_PAUSE", "KEY_SCROLLLOCK".
+    /// Hotkey, e.g. "F12", "Ctrl+Shift+D", "Meta+Space". Rebind from Settings.
     pub hotkey_key: String,
 }
 
@@ -36,7 +36,7 @@ impl Default for Config {
             ollama_url: "http://localhost:11434".to_string(),
             hotkey_backend: "auto".to_string(),
             hotkey_mode: "toggle".to_string(),
-            hotkey_key: "KEY_F12".to_string(),
+            hotkey_key: "F12".to_string(),
         }
     }
 }

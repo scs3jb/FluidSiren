@@ -254,13 +254,16 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
     {
         let weak = settings.as_weak();
         let cfg = cfg.clone();
-        settings.on_captured(move |name| {
-            let name = name.to_string();
+        settings.on_captured(move |raw| {
+            // Canonicalize ("ctrl+d" / control chars → "Ctrl+D").
+            let shortcut = crate::hotkey::Shortcut::parse(raw.as_str())
+                .map(|sc| sc.display())
+                .unwrap_or_else(|| raw.to_string());
             if let Some(s) = weak.upgrade() {
-                s.set_hotkey_key(name.clone().into());
+                s.set_hotkey_key(shortcut.clone().into());
                 persist_settings(&s, &cfg);
             }
-            crate::hotkey::set_portal_shortcut(&name);
+            crate::hotkey::set_portal_shortcut(&shortcut);
         });
     }
     // Close button → quit this process.

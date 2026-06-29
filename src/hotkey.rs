@@ -194,8 +194,11 @@ fn run_controller(
     backend: HotkeyBackend,
     evdev_key: String,
 ) {
-    // Portal trigger derived from the configured key (e.g. "KEY_F12" → "F12").
-    let trigger = evdev_key.strip_prefix("KEY_").unwrap_or(evdev_key.as_str());
+    // Portal trigger = the configured hotkey in canonical form (e.g. "Ctrl+Shift+D").
+    let normalized = Shortcut::parse(&evdev_key)
+        .map(|sc| sc.display())
+        .unwrap_or_else(|| evdev_key.clone());
+    let trigger = normalized.as_str();
     match backend {
         HotkeyBackend::Portal => {
             if let Err(e) = run_portal(&shared, &engine, mode, Some(trigger)) {
@@ -380,8 +383,13 @@ fn run_evdev(
 ) -> Result<()> {
     use evdev::Key;
 
-    let key: Key = key_from_name(key_name)
-        .ok_or_else(|| anyhow!("unknown evdev key name '{key_name}'"))?;
+    // evdev is single-key only; modifier combos are handled by the portal backend.
+    let sc = Shortcut::parse(key_name).ok_or_else(|| anyhow!("invalid hotkey '{key_name}'"))?;
+    if sc.has_modifier() {
+        return Err(anyhow!("modifier combos use the portal backend, not evdev"));
+    }
+    let key: Key = key_from_name(&sc.key)
+        .ok_or_else(|| anyhow!("evdev can't grab key '{}' (use the portal backend)", sc.key))?;
 
     // Find devices that can emit our key. Reading /dev/input needs `input` group
     // membership (or root); enumerate() silently skips devices we can't open.
@@ -431,14 +439,101 @@ fn run_evdev(
     Ok(())
 }
 
+/// A parsed hotkey: optional modifiers + a base key (uppercased name, e.g. "F12",
+/// "D", "SPACE"). Config stores the display form ("Ctrl+Shift+D", "F12").
+#[derive(Default, Clone)]
+pub struct Shortcut {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+    pub key: String,
+}
+
+impl Shortcut {
+    /// Parse "Ctrl+Shift+D", "F12", "Meta+Space", or a bare evdev name "KEY_F12".
+    /// A single control character (Ctrl+letter capture) is decoded back to the letter.
+    pub fn parse(s: &str) -> Option<Shortcut> {
+        let parts: Vec<&str> = s.split('+').map(str::trim).filter(|p| !p.is_empty()).collect();
+        let (mods, key) = parts.split_at(parts.len().checked_sub(1)?);
+        let mut sc = Shortcut::default();
+        for m in mods {
+            match m.to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => sc.ctrl = true,
+                "shift" => sc.shift = true,
+                "alt" | "option" => sc.alt = true,
+                "meta" | "super" | "win" | "logo" | "cmd" => sc.meta = true,
+                _ => return None,
+            }
+        }
+        let raw = key.first()?;
+        let raw = raw.strip_prefix("KEY_").or_else(|| raw.strip_prefix("key_")).unwrap_or(raw);
+        sc.key = normalize_base_key(raw);
+        if sc.key.is_empty() {
+            return None;
+        }
+        Some(sc)
+    }
+
+    /// Canonical display / config form, e.g. "Ctrl+Shift+D".
+    pub fn display(&self) -> String {
+        let mut s = String::new();
+        if self.ctrl {
+            s.push_str("Ctrl+");
+        }
+        if self.alt {
+            s.push_str("Alt+");
+        }
+        if self.shift {
+            s.push_str("Shift+");
+        }
+        if self.meta {
+            s.push_str("Meta+");
+        }
+        s.push_str(&display_key(&self.key));
+        s
+    }
+
+    pub fn has_modifier(&self) -> bool {
+        self.ctrl || self.shift || self.alt || self.meta
+    }
+}
+
+/// Prettify the (uppercased) base key for display: letters/digits/F-keys as-is,
+/// named keys title-cased (SPACE → Space, PAUSE → Pause).
+fn display_key(key: &str) -> String {
+    if key.chars().count() <= 1 {
+        return key.to_string();
+    }
+    if key.starts_with('F') && key[1..].chars().all(|c| c.is_ascii_digit()) {
+        return key.to_string();
+    }
+    let mut c = key.chars();
+    let first = c.next().unwrap();
+    format!("{first}{}", c.as_str().to_ascii_lowercase())
+}
+
+/// Normalize a base-key token: single printable char → uppercase; single control
+/// char (1–26, i.e. Ctrl+letter) → its letter; named key → uppercased name.
+fn normalize_base_key(k: &str) -> String {
+    if k.chars().count() == 1 {
+        let c = k.chars().next().unwrap();
+        let code = c as u32;
+        if (1..=26).contains(&code) {
+            return ((b'A' + code as u8 - 1) as char).to_string();
+        }
+        return c.to_ascii_uppercase().to_string();
+    }
+    k.to_ascii_uppercase()
+}
+
 /// Bind the KDE GlobalShortcuts (portal) `toggle_dictation` shortcut to the given
-/// evdev key, via kglobalaccel's `setForeignShortcut` — the same call System
-/// Settings makes. This makes a settings "Rebind" take effect for portal users
-/// (the captured key then triggers dictation on a real keypress). Best-effort and
-/// non-fatal; evdev users get the same key from the config + live re-bind.
-pub fn set_portal_shortcut(evdev_name: &str) {
-    let Some(qt) = qt_keycode_for(evdev_name) else {
-        tracing::warn!("no Qt keycode for {evdev_name}; portal binding not updated");
+/// hotkey string (e.g. "Ctrl+Shift+D"), via kglobalaccel's `setForeignShortcut`
+/// — the same call System Settings makes. Makes a settings rebind / startup
+/// self-bind take effect on a real keypress. Best-effort and non-fatal.
+pub fn set_portal_shortcut(shortcut: &str) {
+    let Some(qt) = Shortcut::parse(shortcut).and_then(|sc| qt_keycode(&sc)) else {
+        tracing::warn!("no Qt keycode for hotkey '{shortcut}'; portal binding not updated");
         return;
     };
     let action = format!(
@@ -459,7 +554,7 @@ pub fn set_portal_shortcut(evdev_name: &str) {
         ])
         .output();
     match result {
-        Ok(o) if o.status.success() => tracing::info!("portal shortcut set to {evdev_name}"),
+        Ok(o) if o.status.success() => tracing::info!("portal shortcut set to {shortcut}"),
         Ok(o) => tracing::warn!(
             "setForeignShortcut failed: {}",
             String::from_utf8_lossy(&o.stderr).trim()
@@ -468,16 +563,61 @@ pub fn set_portal_shortcut(evdev_name: &str) {
     }
 }
 
-/// Qt key code (`Qt::Key`) for an evdev key name, for `setForeignShortcut`.
-/// Function keys only (the settings capture box offers F1–F12).
-fn qt_keycode_for(evdev_name: &str) -> Option<i32> {
-    let up = evdev_name.strip_prefix("KEY_").unwrap_or(evdev_name);
-    let n: i32 = up.strip_prefix('F')?.parse().ok()?;
-    if (1..=24).contains(&n) {
-        Some(0x0100_002F + n) // Qt::Key_F1 = 0x01000030
-    } else {
-        None
+/// `Qt::Key` value for a shortcut: base key OR'd with modifier flags.
+fn qt_keycode(sc: &Shortcut) -> Option<i32> {
+    let mut code = qt_base_key(&sc.key)?;
+    if sc.shift {
+        code |= 0x0200_0000;
     }
+    if sc.ctrl {
+        code |= 0x0400_0000;
+    }
+    if sc.alt {
+        code |= 0x0800_0000;
+    }
+    if sc.meta {
+        code |= 0x1000_0000;
+    }
+    Some(code)
+}
+
+/// `Qt::Key` for a base key name (no modifiers).
+fn qt_base_key(key: &str) -> Option<i32> {
+    // Function keys: Qt::Key_F1 = 0x01000030.
+    if let Some(n) = key.strip_prefix('F').and_then(|s| s.parse::<i32>().ok()) {
+        if (1..=24).contains(&n) {
+            return Some(0x0100_0030 + (n - 1));
+        }
+    }
+    // Single ASCII letter / digit: Qt key == uppercase ASCII code.
+    if key.chars().count() == 1 {
+        let c = key.chars().next().unwrap();
+        if c.is_ascii_alphanumeric() {
+            return Some(c.to_ascii_uppercase() as i32);
+        }
+    }
+    Some(match key {
+        "SPACE" => 0x20,
+        "TAB" => 0x0100_0001,
+        "RETURN" | "ENTER" => 0x0100_0004,
+        "ESC" | "ESCAPE" => 0x0100_0000,
+        "BACKSPACE" => 0x0100_0003,
+        "INSERT" => 0x0100_0006,
+        "DELETE" => 0x0100_0007,
+        "HOME" => 0x0100_0010,
+        "END" => 0x0100_0011,
+        "PAGEUP" => 0x0100_0016,
+        "PAGEDOWN" => 0x0100_0017,
+        "UP" => 0x0100_0013,
+        "DOWN" => 0x0100_0015,
+        "LEFT" => 0x0100_0012,
+        "RIGHT" => 0x0100_0014,
+        "PAUSE" => 0x0100_0008,
+        "SCROLLLOCK" => 0x0100_0026,
+        "PRINT" => 0x0100_0009,
+        "MENU" => 0x0100_0055,
+        _ => return None,
+    })
 }
 
 /// Per-device blocking read loop. `fetch_events` blocks until input arrives, so
@@ -568,4 +708,56 @@ fn key_from_name(name: &str) -> Option<evdev::Key> {
         "MENU" | "COMPOSE" => Key::KEY_COMPOSE,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disp(s: &str) -> String {
+        Shortcut::parse(s).unwrap().display()
+    }
+    fn qt(s: &str) -> i32 {
+        qt_keycode(&Shortcut::parse(s).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn parse_and_display() {
+        assert_eq!(disp("F12"), "F12");
+        assert_eq!(disp("KEY_F12"), "F12"); // legacy evdev name
+        assert_eq!(disp("ctrl+shift+d"), "Ctrl+Shift+D");
+        assert_eq!(disp("Meta+space"), "Meta+Space");
+        assert_eq!(disp("super+win+d"), "Meta+D"); // super/win → meta, dedup
+    }
+
+    #[test]
+    fn control_char_decodes_to_letter() {
+        // Ctrl+D captured in-window arrives as the control char \u{4}.
+        assert_eq!(disp("ctrl+\u{4}"), "Ctrl+D");
+        assert_eq!(disp("ctrl+\u{1}"), "Ctrl+A");
+    }
+
+    #[test]
+    fn qt_keycodes() {
+        assert_eq!(qt("F1"), 0x0100_0030);
+        assert_eq!(qt("F12"), 0x0100_003B); // 16777275
+        assert_eq!(qt("D"), 0x44); // Qt::Key_D
+        assert_eq!(qt("Ctrl+Shift+D"), 0x44 | 0x0400_0000 | 0x0200_0000);
+        assert_eq!(qt("Meta+Space"), 0x20 | 0x1000_0000);
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert!(Shortcut::parse("Hyper+D").is_none()); // unknown modifier
+        assert!(Shortcut::parse("").is_none());
+        assert!(qt_keycode(&Shortcut::parse("ScrollLock").unwrap()).is_some());
+    }
+
+    #[test]
+    fn evdev_only_single_keys() {
+        let combo = Shortcut::parse("Ctrl+D").unwrap();
+        assert!(combo.has_modifier());
+        let single = Shortcut::parse("F12").unwrap();
+        assert!(!single.has_modifier());
+    }
 }

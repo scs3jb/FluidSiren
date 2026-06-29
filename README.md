@@ -42,7 +42,8 @@ GlobalShortcuts portal — it works out of the box, no System Settings step. Pre
 to start/stop dictation.
 
 To **change it**: tray → **Settings…** → *Dictation hotkey* → click the box and
-press the key you want, then **Save**. The change applies live.
+press the key or combo you want (e.g. `Ctrl+Shift+D`, `Meta+Space`), then **Save**.
+The change applies live.
 
 **Advanced — a direct evdev key** (bypasses the portal, supports true
 push-to-talk) needs read access to input devices:
@@ -95,7 +96,7 @@ installed side-by-side.
 | `ollama_model` / `ollama_url` | `llama3.2:3b` / `http://localhost:11434` | |
 | `hotkey_backend` | `auto` | `auto` \| `portal` \| `evdev` |
 | `hotkey_mode` | `toggle` | `toggle` \| `push_to_talk` (evdev only) |
-| `hotkey_key` | `KEY_F12` | the hotkey; rebind from Settings instead of editing by hand |
+| `hotkey_key` | `F12` | the hotkey (e.g. `F12`, `Ctrl+Shift+D`, `Meta+Space`); rebind from Settings |
 
 The settings window runs as a separate process and edits this file; the running
 app picks up changes (enhancement, hotkey) live.
