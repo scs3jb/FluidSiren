@@ -1,6 +1,6 @@
-//! Speech-to-text. v1 provider: Whisper via whisper-rs (whisper.cpp).
-//!
-//! Models are downloaded on demand from the official whisper.cpp HF repo.
+//! Speech-to-text providers. Whisper (whisper.cpp) is the always-available
+//! default; Parakeet (NVIDIA NeMo transducer via sherpa-onnx) is an optional
+//! provider selected by `config.provider`.
 
 use crate::config::Config;
 use anyhow::{anyhow, Context, Result};
@@ -9,14 +9,44 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 const HF_BASE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
-/// Ensure the configured ggml model exists locally, downloading if needed.
-pub async fn ensure_model(cfg: &Config) -> Result<std::path::PathBuf> {
+/// A loaded speech-to-text model. Implementations transcribe 16 kHz mono f32
+/// audio. `Send` so the engine can own it on its worker thread.
+pub trait Transcriber: Send {
+    fn transcribe(&self, audio_16k_mono: &[f32]) -> Result<String>;
+}
+
+/// Build the transcriber selected by `config.provider`, downloading its model on
+/// first use. Falls back to Whisper for an unknown provider.
+pub async fn load_transcriber(cfg: &Config) -> Result<Box<dyn Transcriber>> {
+    match cfg.provider.as_str() {
+        "parakeet" => {
+            #[cfg(feature = "parakeet")]
+            {
+                Ok(Box::new(crate::parakeet::Parakeet::load(cfg).await?))
+            }
+            #[cfg(not(feature = "parakeet"))]
+            {
+                Err(anyhow!("Parakeet support not built in (rebuild with --features parakeet)"))
+            }
+        }
+        other => {
+            if other != "whisper" {
+                tracing::warn!("unknown provider '{other}', using whisper");
+            }
+            let path = ensure_whisper_model(cfg).await?;
+            println!("Loading whisper model '{}'...", cfg.whisper_model);
+            Ok(Box::new(Whisper::load(&path, &cfg.language)?))
+        }
+    }
+}
+
+/// Ensure the configured ggml whisper model exists locally, downloading if needed.
+async fn ensure_whisper_model(cfg: &Config) -> Result<std::path::PathBuf> {
     let path = cfg.model_path()?;
     if path.exists() {
         return Ok(path);
     }
     let url = format!("{HF_BASE}/ggml-{}.bin", cfg.whisper_model);
-    tracing::info!("downloading whisper model {} ...", cfg.whisper_model);
     eprintln!("Downloading whisper model '{}' (one-time)...", cfg.whisper_model);
 
     let resp = reqwest::get(&url).await.with_context(|| format!("GET {url}"))?;
@@ -31,7 +61,7 @@ pub async fn ensure_model(cfg: &Config) -> Result<std::path::PathBuf> {
     Ok(path)
 }
 
-/// A loaded whisper model ready to transcribe 16 kHz mono f32 audio.
+/// A loaded whisper model.
 pub struct Whisper {
     ctx: WhisperContext,
     language: String,
@@ -46,8 +76,10 @@ impl Whisper {
         .context("loading whisper model")?;
         Ok(Self { ctx, language: language.to_string() })
     }
+}
 
-    pub fn transcribe(&self, audio_16k_mono: &[f32]) -> Result<String> {
+impl Transcriber for Whisper {
+    fn transcribe(&self, audio_16k_mono: &[f32]) -> Result<String> {
         let mut state = self.ctx.create_state().context("creating whisper state")?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);

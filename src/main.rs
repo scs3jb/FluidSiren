@@ -13,6 +13,8 @@ mod enhance;
 mod hotkey;
 mod inject;
 mod overlay;
+#[cfg(feature = "parakeet")]
+mod parakeet;
 mod scope;
 mod ui;
 
@@ -53,9 +55,7 @@ fn main() -> Result<()> {
     // Model download + load (snapshot of the shared config).
     let snapshot = cfg.lock().unwrap().clone();
     let rt = tokio::runtime::Runtime::new()?;
-    let model_path = rt.block_on(asr::ensure_model(&snapshot))?;
-    println!("Loading whisper model '{}'...", snapshot.whisper_model);
-    let whisper = asr::Whisper::load(&model_path, &snapshot.language)?;
+    let transcriber = rt.block_on(asr::load_transcriber(&snapshot))?;
     drop(rt); // the engine builds its own runtime; release this one.
 
     if !inject::available() {
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         }
         let engine = DictationEngine::spawn(
             cfg.clone(),
-            whisper,
+            transcriber,
             Box::new(|ev| {
                 if let EngineEvent::Error(e) = ev {
                     eprintln!("Engine error: {e}");
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     let cfg_for_hotkey = cfg.clone();
 
     ui::run(cfg.clone(), move |callback| {
-        let engine = DictationEngine::spawn(cfg_for_engine, whisper, callback);
+        let engine = DictationEngine::spawn(cfg_for_engine, transcriber, callback);
         spawn_hotkey_watcher(engine.clone(), cfg_for_hotkey);
         engine
     })

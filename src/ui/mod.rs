@@ -211,6 +211,7 @@ pub fn run(
 /// Read the settings form into the shared config and persist it to disk.
 fn persist_settings(s: &Settings, cfg: &Arc<Mutex<Config>>) {
     let mut c = cfg.lock().unwrap();
+    c.provider = s.get_provider().to_string();
     c.whisper_model = s.get_whisper_model().to_string();
     c.language = s.get_language().to_string();
     c.enhance = s.get_enhance();
@@ -230,6 +231,7 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
     let settings = Settings::new()?;
     {
         let c = cfg.lock().unwrap();
+        settings.set_provider(c.provider.clone().into());
         settings.set_whisper_model(c.whisper_model.clone().into());
         settings.set_language(c.language.clone().into());
         settings.set_enhance(c.enhance);

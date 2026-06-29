@@ -4,7 +4,7 @@
 //! `Clone`-able, `Send` handle by sending commands; it reports progress through
 //! an event callback.
 
-use crate::asr::Whisper;
+use crate::asr::Transcriber;
 use crate::audio::{Recorder, WHISPER_SAMPLE_RATE};
 use crate::config::Config;
 use crate::{enhance, inject};
@@ -41,12 +41,12 @@ impl DictationEngine {
     /// Spawn the engine thread. `cfg` is shared so the UI can change settings
     /// (e.g. toggle enhancement) live. Changing the whisper model still needs a
     /// reload (not yet wired).
-    pub fn spawn(cfg: Arc<Mutex<Config>>, whisper: Whisper, on_event: EventCallback) -> Self {
+    pub fn spawn(cfg: Arc<Mutex<Config>>, transcriber: Box<dyn Transcriber>, on_event: EventCallback) -> Self {
         let inject_ok = inject::available();
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
         std::thread::Builder::new()
             .name("dictation-engine".into())
-            .spawn(move || run(cfg, whisper, inject_ok, cmd_rx, on_event))
+            .spawn(move || run(cfg, transcriber, inject_ok, cmd_rx, on_event))
             .expect("spawn engine thread");
         Self { cmd_tx }
     }
@@ -92,7 +92,7 @@ impl DictationEngine {
 
 fn run(
     cfg: Arc<Mutex<Config>>,
-    whisper: Whisper,
+    transcriber: Box<dyn Transcriber>,
     inject_ok: bool,
     cmd_rx: mpsc::Receiver<Command>,
     on_event: EventCallback,
@@ -114,7 +114,7 @@ fn run(
             },
             Command::Stop { reply } => {
                 let text = match current.take() {
-                    Some(r) => process(&whisper, &rt, &cfg, inject_ok, &on_event, r.stop()),
+                    Some(r) => process(&*transcriber, &rt, &cfg, inject_ok, &on_event, r.stop()),
                     None => String::new(),
                 };
                 if let Some(tx) = reply {
@@ -122,7 +122,7 @@ fn run(
                 }
             }
             Command::Process { audio, reply } => {
-                let text = process(&whisper, &rt, &cfg, inject_ok, &on_event, audio);
+                let text = process(&*transcriber, &rt, &cfg, inject_ok, &on_event, audio);
                 if let Some(tx) = reply {
                     let _ = tx.send(text);
                 }
@@ -133,7 +133,7 @@ fn run(
 }
 
 fn process(
-    whisper: &Whisper,
+    transcriber: &dyn Transcriber,
     rt: &tokio::runtime::Runtime,
     cfg: &Arc<Mutex<Config>>,
     inject_ok: bool,
@@ -144,7 +144,7 @@ fn process(
     tracing::info!("processing {secs:.1}s clip");
     on_event(EngineEvent::Processing);
 
-    let raw = match whisper.transcribe(&audio) {
+    let raw = match transcriber.transcribe(&audio) {
         Ok(t) => t,
         Err(e) => {
             on_event(EngineEvent::Error(format!("transcription failed: {e:#}")));

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// ASR provider: "whisper" | "parakeet".
+    pub provider: String,
     /// Whisper ggml model name (resolved against the whisper.cpp HF repo).
     pub whisper_model: String,
     /// Language hint for whisper ("en", "auto", ...).
@@ -29,6 +31,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            provider: "whisper".to_string(),
             whisper_model: "base.en".to_string(),
             language: "en".to_string(),
             enhance: false,

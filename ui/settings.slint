@@ -4,6 +4,7 @@
 import { LineEdit, CheckBox, ComboBox, Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
 export component Settings inherits Window {
+    in-out property <string> provider: "whisper";
     in-out property <string> whisper-model: "base.en";
     in-out property <string> language: "en";
     in-out property <bool> enhance: false;
@@ -21,7 +22,7 @@ export component Settings inherits Window {
 
     title: "FluidSiren — Settings";
     width: 460px;
-    height: 560px;
+    height: 620px;
     background: #1e1e2e;
 
     VerticalBox {
@@ -33,6 +34,20 @@ export component Settings inherits Window {
             color: #cdd6f4;
             font-size: 20px;
             font-weight: 700;
+        }
+
+        Text { text: "Speech model"; color: #a6adc8; font-size: 13px; }
+        ComboBox {
+            model: ["whisper", "parakeet"];
+            current-value <=> root.provider;
+        }
+        Text {
+            text: root.provider == "parakeet"
+                ? "Parakeet TDT — fast, accurate English (~460 MB, downloads on first use)"
+                : "Whisper — multilingual; pick a ggml model below";
+            color: #6c7086;
+            font-size: 11px;
+            wrap: word-wrap;
         }
 
         Text { text: "Whisper model"; color: #a6adc8; font-size: 13px; }

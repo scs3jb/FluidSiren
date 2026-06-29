@@ -27,6 +27,10 @@ package() {
     cd "FluidSiren-$pkgver"
     install -Dm755 target/release/fluidsiren "$pkgdir/usr/bin/fluidsiren"
     install -Dm755 target/release/fluidsiren-overlay "$pkgdir/usr/bin/fluidsiren-overlay"
+    # Parakeet libs — the binary's $ORIGIN/../lib/fluidsiren rpath finds them here.
+    for lib in target/release/libsherpa-onnx-*.so target/release/libonnxruntime.so; do
+        install -Dm644 "$lib" "$pkgdir/usr/lib/fluidsiren/$(basename "$lib")"
+    done
     install -Dm644 packaging/dev.altic.FluidSiren.desktop \
         "$pkgdir/usr/share/applications/dev.altic.FluidSiren.desktop"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

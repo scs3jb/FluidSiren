@@ -1,0 +1,6 @@
+# The "parakeet" feature dynamically links libsherpa-onnx-c-api.so + libonnxruntime.so.
+# Set an $ORIGIN rpath so the binary finds them next to itself (target/release, or
+# the install dir) and in a sibling lib/fluidsiren dir (system packages). The
+# installer / PKGBUILD copy those .so files alongside the binary.
+[build]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN:$ORIGIN/../lib/fluidsiren"]

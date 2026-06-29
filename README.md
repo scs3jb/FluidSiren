@@ -9,7 +9,7 @@ hotkey, talk, and your speech is transcribed on-device with Whisper and typed in
 whatever window is focused — with an optional local-LLM cleanup pass and a live
 waveform overlay. Nothing leaves your machine.
 
-- **On-device ASR** — Whisper via `whisper.cpp` (CPU by default; CUDA / Vulkan opt-in).
+- **On-device ASR** — **Whisper** (multilingual, `whisper.cpp`) or **Parakeet TDT** (fast, accurate English; NVIDIA NeMo via sherpa-onnx). Pick in Settings. CPU by default; CUDA / Vulkan opt-in.
 - **Global hotkey** — self-binds on startup via the XDG GlobalShortcuts portal (KDE), rebindable from Settings; optional direct evdev key with push-to-talk.
 - **Types into any app** — via `ydotool` (uinput), which works under KWin.
 - **Optional cleanup** — local LLM via Ollama fixes punctuation/casing/fillers; degrades gracefully if absent.
@@ -86,6 +86,7 @@ installed side-by-side.
 
 | Key | Default | Notes |
 | --- | --- | --- |
+| `provider` | `whisper` | `whisper` \| `parakeet` (switch in Settings; restart to apply) |
 | `whisper_model` | `base.en` | any whisper.cpp ggml name (`tiny.en`, `small.en`, `large-v3`, …) |
 | `language` | `en` | or `auto` |
 | `enhance` | `false` | Ollama cleanup pass |
@@ -96,6 +97,18 @@ installed side-by-side.
 
 The settings window runs as a separate process and edits this file; the running
 app picks up changes (enhancement, hotkey) live.
+
+## Speech models
+
+- **Whisper** (default) — `whisper.cpp`, multilingual, sizes from `tiny` to `large-v3`.
+- **Parakeet TDT 0.6B v2** — NVIDIA NeMo transducer via sherpa-onnx; fast and very
+  accurate for English. ~460 MB int8 model, downloaded on first use to
+  `~/.local/share/fluidsiren/models/`. Select **parakeet** in Settings.
+
+The transcriber is a pluggable trait, so more models slot in behind it. Nemotron
+(NeMo) would follow the same sherpa-onnx path once an ONNX export is published;
+Cohere's ASR isn't available in this runtime yet. Build without Parakeet (smaller,
+no sherpa-onnx) via `cargo build --release --no-default-features`.
 
 ## License
 

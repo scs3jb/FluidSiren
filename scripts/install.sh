@@ -27,6 +27,17 @@ install -Dm755 target/release/fluidsiren "$bindir/fluidsiren"
 install -Dm755 target/release/fluidsiren-overlay "$bindir/fluidsiren-overlay"
 echo "==> Installed binaries to $bindir"
 
+# Bundle the sherpa-onnx / onnxruntime libs (Parakeet provider) into
+# ~/.local/lib/fluidsiren; the binary's $ORIGIN/../lib/fluidsiren rpath finds them.
+shopt -s nullglob
+libs=(target/release/libsherpa-onnx-*.so* target/release/libonnxruntime.so*)
+if (( ${#libs[@]} )); then
+    libdir="$HOME/.local/lib/fluidsiren"
+    mkdir -p "$libdir"
+    cp -f "${libs[@]}" "$libdir/"
+    echo "==> Installed Parakeet libs to $libdir"
+fi
+
 # Desktop entry — its basename (dev.altic.FluidSiren) is the app id the KDE
 # GlobalShortcuts portal attributes the hotkey to, so it must be installed.
 sed "s|^Exec=.*|Exec=$bindir/fluidsiren|" packaging/dev.altic.FluidSiren.desktop \
