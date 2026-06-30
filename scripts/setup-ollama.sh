@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Install + configure a local Ollama server for FluidSiren transcript cleanup.
 #
-# Idempotent: installs the `ollama` binary if missing, ensures the server is
-# running, pulls the configured model, and warms it up. Safe to re-run.
+# Idempotent: installs the `ollama` binary if missing, installs a systemd unit,
+# and pulls the configured model. It does NOT leave Ollama running: the server is
+# started only long enough to pull the model (and only if it wasn't already up),
+# then stopped. FluidSiren starts it on demand when you enable enhancement.
 #
 # Two modes:
 #   scripts/setup-ollama.sh            # SYSTEM: official installer (sudo, system service)
@@ -13,7 +15,8 @@
 #
 # Env:
 #   OLLAMA_MODEL=qwen2.5:3b   # model to pull (default llama3.2:3b)
-#   OLLAMA_KEEP_ALIVE=-1      # how long to keep the model loaded (default 30m; -1 = forever)
+#   OLLAMA_KEEP_ALIVE=-1      # how long the running server keeps the model loaded
+#                             # (default 30m; -1 = forever). Used at runtime, not here.
 set -euo pipefail
 
 mode="system"
@@ -29,22 +32,23 @@ wait_up() {
     return 1
 }
 
-pull_and_warm() {
+pull_model() {
     echo "==> Pulling model '$model' (first run can be a few GB)…"
     if ! ollama pull "$model"; then
         echo "!!  Failed to pull '$model'. Retry with: ollama pull $model" >&2
         exit 1
     fi
-    echo "==> Warming up '$model' (loads it into memory; keep_alive=$keep_alive)…"
-    curl -fsS --max-time 120 http://localhost:11434/api/generate \
-        -d "{\"model\":\"$model\",\"prompt\":\"\",\"keep_alive\":\"$keep_alive\"}" \
-        >/dev/null 2>&1 || echo "!!  Warm-up request failed (non-fatal)." >&2
     echo "==> Model '$model' ready."
 }
 
+# Was a server already running before we touched anything? If so, we leave it as
+# we found it; if not, install must not leave one running.
+was_up_before=0
+ollama_up && was_up_before=1
+
 # ── USER mode: ~/.local binary + a systemd --user service ────────────────────
 if [[ "$mode" == "user" ]]; then
-    echo "==> FluidSiren: setting up a USER-level Ollama (model: $model, keep_alive: $keep_alive)"
+    echo "==> FluidSiren: setting up a USER-level Ollama (model: $model)"
 
     # 1. Ensure the binary exists. Reuse any ollama on PATH; otherwise do a rootless
     #    install into ~/.local (the documented manual install — no sudo).
@@ -78,7 +82,7 @@ if [[ "$mode" == "user" ]]; then
         echo "        sudo systemctl disable --now ollama"
     fi
 
-    # 3. Write + start the user unit (carries OLLAMA_KEEP_ALIVE so the model stays warm).
+    # 3. Write the user unit (carries OLLAMA_KEEP_ALIVE for when it does run).
     unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$unit_dir"
     cat > "$unit_dir/ollama.service" <<UNIT
@@ -96,31 +100,36 @@ RestartSec=2
 WantedBy=default.target
 UNIT
     echo "==> Wrote $unit_dir/ollama.service"
+    # Not enabled and not left running — FluidSiren controls start/stop on demand.
     systemctl --user daemon-reload
-    # Start, but do NOT `enable` — Ollama should not autostart at login. FluidSiren
-    # starts it on demand (when enhancement is on, or via the Settings Start button).
-    systemctl --user start ollama
 
-    if wait_up; then echo "==> User Ollama server is up."; else
-        echo "!!  Server didn't come up. Check: systemctl --user status ollama" >&2
-        exit 1
+    # 4. Start the server only if needed, just to pull the model, then put it back.
+    we_started=0
+    if ! ollama_up; then
+        systemctl --user start ollama
+        we_started=1
+        wait_up || { echo "!!  Server didn't come up to pull the model. Check: systemctl --user status ollama" >&2; exit 1; }
+        echo "==> Started Ollama temporarily to pull the model."
     fi
-    pull_and_warm
+    pull_model
+    if (( we_started )) && (( ! was_up_before )); then
+        systemctl --user stop ollama
+        echo "==> Stopped Ollama — install leaves it not running."
+    fi
 
     cat <<EOF
 
-Done. A user-level Ollama is set up for FluidSiren.
+Done. A user-level Ollama is set up for FluidSiren (and left stopped).
   • Managed by: systemctl --user {start,stop,status} ollama   (no password prompts)
-  • NOT enabled at login — FluidSiren starts it on demand, or start it yourself
-    with: systemctl --user start ollama
-  • Enable "Enhance transcript with Ollama" in FluidSiren → Settings.
-  • The Settings window shows live status + Start/Stop/Warm-up controls.
+  • Not enabled at login and not running now. It starts only when you enable
+    "Enhance transcript with Ollama" in FluidSiren → Settings (or hit Start there),
+    or manually: systemctl --user start ollama
 EOF
     exit 0
 fi
 
 # ── SYSTEM mode: official installer + system service ─────────────────────────
-echo "==> FluidSiren: setting up a SYSTEM-level Ollama (model: $model, keep_alive: $keep_alive)"
+echo "==> FluidSiren: setting up a SYSTEM-level Ollama (model: $model)"
 
 if ! command -v ollama >/dev/null 2>&1; then
     echo "==> Installing Ollama via the official install script…"
@@ -129,32 +138,36 @@ else
     echo "==> Ollama already installed ($(ollama --version 2>/dev/null | head -n1))."
 fi
 
-if ollama_up; then
-    echo "==> Ollama server already running."
-else
-    if systemctl --user list-unit-files ollama.service >/dev/null 2>&1 \
-        && systemctl --user start ollama 2>/dev/null; then
-        echo "==> Started Ollama via 'systemctl --user'."
-    elif systemctl list-unit-files ollama.service >/dev/null 2>&1 \
+# Ensure a server is up just long enough to pull the model.
+we_started=0
+if ! ollama_up; then
+    if systemctl list-unit-files ollama.service >/dev/null 2>&1 \
         && sudo systemctl start ollama 2>/dev/null; then
-        echo "==> Started Ollama via system 'systemctl'."
+        we_started=1
+        echo "==> Started Ollama (system service) temporarily to pull the model."
     else
-        echo "==> Starting detached 'ollama serve'…"
-        setsid ollama serve >/dev/null 2>&1 </dev/null &
-    fi
-    if ! wait_up; then
-        echo "!!  Ollama server did not come up in time; try 'ollama serve' manually." >&2
+        echo "!!  Could not start a server to pull the model. Start it and re-run." >&2
         exit 1
     fi
-    echo "==> Ollama server is up."
+    wait_up || { echo "!!  Ollama server did not come up in time." >&2; exit 1; }
 fi
 
-pull_and_warm
+pull_model
+
+# The official installer enables + starts the service. If it wasn't running before
+# we began, leave the machine as we found it: stop and disable so install doesn't
+# silently leave Ollama running or autostarting at boot.
+if (( ! was_up_before )); then
+    echo "==> Stopping + disabling the system service so install doesn't leave it running…"
+    sudo systemctl disable --now ollama 2>/dev/null \
+        || echo "!!  Could not stop/disable it; do so with: sudo systemctl disable --now ollama" >&2
+fi
 
 cat <<EOF
 
-Done. Ollama is set up for FluidSiren.
+Done. Ollama is set up for FluidSiren (and left stopped).
   • Tip: 'scripts/setup-ollama.sh --user' installs a no-sudo user service instead.
-  • Enable "Enhance transcript with Ollama" in FluidSiren → Settings.
-  • With that option on, the app starts + warms the server automatically on launch.
+  • It starts only when you enable "Enhance transcript with Ollama" in
+    FluidSiren → Settings (or hit Start there). A system service start prompts
+    for authentication (polkit); --user mode does not.
 EOF
