@@ -20,6 +20,10 @@ pub struct Config {
     pub ollama_model: String,
     /// Ollama base URL.
     pub ollama_url: String,
+    /// How long Ollama keeps the model resident after a request ("5m", "30m",
+    /// "1h", or "-1" for forever). Longer avoids slow cold-reloads between
+    /// dictations at the cost of holding RAM/VRAM.
+    pub ollama_keep_alive: String,
     /// Hotkey backend: "auto" | "portal" | "evdev".
     pub hotkey_backend: String,
     /// Hotkey trigger mode: "toggle" | "push_to_talk".
@@ -37,6 +41,7 @@ impl Default for Config {
             enhance: false,
             ollama_model: "llama3.2:3b".to_string(),
             ollama_url: "http://localhost:11434".to_string(),
+            ollama_keep_alive: "30m".to_string(),
             hotkey_backend: "auto".to_string(),
             hotkey_mode: "toggle".to_string(),
             hotkey_key: "F12".to_string(),

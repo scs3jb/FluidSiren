@@ -12,6 +12,7 @@ mod engine;
 mod enhance;
 mod hotkey;
 mod inject;
+mod ollama;
 mod overlay;
 #[cfg(feature = "parakeet")]
 mod parakeet;
@@ -57,6 +58,27 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let transcriber = rt.block_on(asr::load_transcriber(&snapshot))?;
     drop(rt); // the engine builds its own runtime; release this one.
+
+    // If transcript enhancement is enabled, bring up the local Ollama server now
+    // so the first dictation cleans up instead of silently falling back to the raw
+    // transcript. Best-effort: a failure here never blocks dictation.
+    if snapshot.enhance {
+        match ollama::start() {
+            Ok(()) => println!("Ollama enhancement enabled — local server ensured running."),
+            Err(e) => eprintln!("Ollama enhancement enabled, but the server could not be started: {e:#}"),
+        }
+        // Preload the model in the background so the first dictation is fast.
+        // Detached: a cold model load can take tens of seconds; never block startup.
+        let warm_cfg = snapshot.clone();
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                match rt.block_on(enhance::warm_up(&warm_cfg)) {
+                    Ok(()) => println!("Ollama model warmed up (kept alive for {}).", warm_cfg.ollama_keep_alive),
+                    Err(e) => eprintln!("Ollama warm-up failed (first dictation may be slow): {e:#}"),
+                }
+            }
+        });
+    }
 
     if !inject::available() {
         eprintln!(

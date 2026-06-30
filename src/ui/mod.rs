@@ -217,6 +217,7 @@ fn persist_settings(s: &Settings, cfg: &Arc<Mutex<Config>>) {
     c.enhance = s.get_enhance();
     c.ollama_model = s.get_ollama_model().to_string();
     c.ollama_url = s.get_ollama_url().to_string();
+    c.ollama_keep_alive = s.get_ollama_keep_alive().to_string();
     c.hotkey_key = s.get_hotkey_key().to_string();
     if let Err(e) = c.save() {
         eprintln!("FluidSiren: failed to save config: {e:#}");
@@ -237,6 +238,7 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
         settings.set_enhance(c.enhance);
         settings.set_ollama_model(c.ollama_model.clone().into());
         settings.set_ollama_url(c.ollama_url.clone().into());
+        settings.set_ollama_keep_alive(c.ollama_keep_alive.clone().into());
         settings.set_hotkey_key(c.hotkey_key.clone().into());
     }
     // Save → write the form into the config file.
@@ -268,6 +270,46 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
             crate::hotkey::set_portal_shortcut(&shortcut);
         });
     }
+    // Manual Ollama controls: start/stop the local server by hand. When "Enhance"
+    // is enabled the main app starts it automatically (see `main`); these let the
+    // user manage it otherwise. The live status text updates on the next poll tick.
+    settings.set_ollama_installed(crate::ollama::installed());
+    settings.on_start_ollama(|| {
+        if let Err(e) = crate::ollama::start() {
+            eprintln!("FluidSiren: could not start Ollama: {e:#}");
+        }
+    });
+    settings.on_stop_ollama(|| {
+        if let Err(e) = crate::ollama::stop() {
+            eprintln!("FluidSiren: could not stop Ollama: {e:#}");
+        }
+    });
+    // Warm up now: preload the model using the form's current Ollama fields (no
+    // save required) so the user can feel the speed-up immediately. Runs off-thread
+    // since a cold load can take tens of seconds.
+    {
+        let weak = settings.as_weak();
+        settings.on_warm_up_ollama(move || {
+            let Some(s) = weak.upgrade() else { return };
+            let mut c = Config::load().unwrap_or_default();
+            c.enhance = true; // warming up implies enhancement intent
+            c.ollama_model = s.get_ollama_model().to_string();
+            c.ollama_url = s.get_ollama_url().to_string();
+            c.ollama_keep_alive = s.get_ollama_keep_alive().to_string();
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    match rt.block_on(crate::enhance::warm_up(&c)) {
+                        Ok(()) => println!("Ollama warmed up (kept alive for {}).", c.ollama_keep_alive),
+                        Err(e) => eprintln!("FluidSiren: Ollama warm-up failed: {e:#}"),
+                    }
+                }
+            });
+        });
+    }
+    // Poll Ollama reachability in the background and push the green/red status into
+    // the window. Reads the config each tick so edits to `ollama-url` take effect.
+    spawn_ollama_probe(settings.as_weak());
+
     // Close button → quit this process.
     settings.on_close_requested(|| {
         let _ = slint::quit_event_loop();
@@ -281,4 +323,36 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
     settings.show()?; // shown before run_event_loop → maps correctly
     slint::run_event_loop()?;
     Ok(())
+}
+
+/// Poll the local Ollama server every few seconds and push the result into the
+/// settings window's `ollama-running` property (drives the green/red status).
+///
+/// Runs on its own thread with a small tokio runtime so the network probe never
+/// blocks the UI thread; it reloads config each tick so changing `ollama-url`
+/// re-points the probe. The thread exits with the process when the window closes.
+fn spawn_ollama_probe(weak: slint::Weak<Settings>) {
+    std::thread::Builder::new()
+        .name("ollama-probe".into())
+        .spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            loop {
+                let cfg = Config::load().unwrap_or_default();
+                let reachable = rt.block_on(crate::enhance::is_available(&cfg));
+                // Bail out once the window is gone (process about to exit).
+                if weak
+                    .upgrade_in_event_loop(move |s| s.set_ollama_running(reachable))
+                    .is_err()
+                {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        })
+        .expect("spawn ollama-probe thread");
 }

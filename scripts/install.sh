@@ -51,6 +51,28 @@ if [[ "${ENABLE_AUTOSTART:-}" == "1" ]]; then
     echo "==> Enabled autostart"
 fi
 
+# Optional value-add: set up local Ollama for transcript enhancement. This is
+# strictly best-effort — FluidSiren works fully without it (enhancement just stays
+# off), so any failure here is a warning, never fatal to the install. Attempted by
+# default; skip with SKIP_OLLAMA=1 (it pulls a model, a few GB). Defaults to the
+# rootless user-service mode (no sudo/polkit prompts); OLLAMA_SYSTEM=1 uses the
+# official system-service install. Override with OLLAMA_MODEL=… / OLLAMA_KEEP_ALIVE=…
+if [[ "${SKIP_OLLAMA:-}" == "1" ]]; then
+    echo "==> Skipping optional Ollama setup (SKIP_OLLAMA=1)."
+else
+    ollama_args=(--user)
+    [[ "${OLLAMA_SYSTEM:-}" == "1" ]] && ollama_args=()
+    echo "==> Setting up optional Ollama enhancement (best-effort; SKIP_OLLAMA=1 to skip)…"
+    # Non-fatal by construction: a command in an `if` condition is exempt from
+    # errexit, so whatever the setup script does, the install continues.
+    if bash "$here/scripts/setup-ollama.sh" "${ollama_args[@]}"; then
+        : # set up successfully
+    else
+        echo "!!  Ollama setup didn't finish — that's fine; FluidSiren works without it." >&2
+        echo "    Re-run later with: scripts/setup-ollama.sh --user" >&2
+    fi
+fi
+
 # ydotool daemon is needed for typing into apps.
 if ! pgrep -x ydotoold >/dev/null 2>&1; then
     echo "!!  ydotoold is not running — typing won't work until it is."
@@ -67,5 +89,7 @@ cat <<EOF
 Done. Run:  fluidsiren
   • first run downloads the Whisper model (~142 MB)
   • the hotkey self-binds (default F12); rebind it from Settings
-  • optional: Ollama for cleanup, 'input' group for a direct evdev hotkey
+  • optional: Ollama cleans up transcripts when enabled in Settings
+    (set up above if it succeeded; otherwise run scripts/setup-ollama.sh --user)
+  • optional: 'input' group for a direct evdev hotkey
 EOF
