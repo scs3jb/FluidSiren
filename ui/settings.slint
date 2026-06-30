@@ -29,14 +29,17 @@ export component Settings inherits Window {
     callback stop-ollama();
     // Preload the model now so the next dictation is fast.
     callback warm-up-ollama();
+    // Emitted when the enhancement checkbox is toggled; carries the new state.
+    // Rust starts Ollama immediately when this turns on.
+    callback enhance-toggled(bool);
 
     title: "FluidSiren — Settings";
     // preferred-* (not fixed width/height) keeps the window user-resizable; the
     // ScrollView below lets the form scroll when the window is shrunk.
     preferred-width: 540px;
-    preferred-height: 760px;
+    preferred-height: 900px;
     min-width: 460px;
-    min-height: 420px;
+    min-height: 480px;
     background: #1e1e2e;
 
     VerticalBox {
@@ -91,6 +94,7 @@ export component Settings inherits Window {
         CheckBox {
             text: "Enhance transcript with Ollama";
             checked <=> root.enhance;
+            toggled => { root.enhance-toggled(self.checked); }
         }
 
         Text { text: "Ollama model"; color: #a6adc8; font-size: 13px; }

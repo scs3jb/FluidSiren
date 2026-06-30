@@ -270,6 +270,26 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
             crate::hotkey::set_portal_shortcut(&shortcut);
         });
     }
+    // Enhancement checkbox: starting Ollama "automatically when checked" means the
+    // moment it's ticked here (in addition to app launch — see `main`). Persist the
+    // flag so the running app enhances, and start the server now when enabling.
+    {
+        let cfg = cfg.clone();
+        settings.on_enhance_toggled(move |checked| {
+            {
+                let mut c = cfg.lock().unwrap();
+                c.enhance = checked;
+                if let Err(e) = c.save() {
+                    eprintln!("FluidSiren: failed to save enhance flag: {e:#}");
+                }
+            }
+            if checked {
+                if let Err(e) = crate::ollama::start() {
+                    eprintln!("FluidSiren: could not start Ollama: {e:#}");
+                }
+            }
+        });
+    }
     // Manual Ollama controls: start/stop the local server by hand. When "Enhance"
     // is enabled the main app starts it automatically (see `main`); these let the
     // user manage it otherwise. The live status text updates on the next poll tick.

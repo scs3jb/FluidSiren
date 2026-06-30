@@ -97,7 +97,9 @@ WantedBy=default.target
 UNIT
     echo "==> Wrote $unit_dir/ollama.service"
     systemctl --user daemon-reload
-    systemctl --user enable --now ollama
+    # Start, but do NOT `enable` — Ollama should not autostart at login. FluidSiren
+    # starts it on demand (when enhancement is on, or via the Settings Start button).
+    systemctl --user start ollama
 
     if wait_up; then echo "==> User Ollama server is up."; else
         echo "!!  Server didn't come up. Check: systemctl --user status ollama" >&2
@@ -107,8 +109,10 @@ UNIT
 
     cat <<EOF
 
-Done. A user-level Ollama is running for FluidSiren.
+Done. A user-level Ollama is set up for FluidSiren.
   • Managed by: systemctl --user {start,stop,status} ollama   (no password prompts)
+  • NOT enabled at login — FluidSiren starts it on demand, or start it yourself
+    with: systemctl --user start ollama
   • Enable "Enhance transcript with Ollama" in FluidSiren → Settings.
   • The Settings window shows live status + Start/Stop/Warm-up controls.
 EOF
