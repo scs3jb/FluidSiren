@@ -67,6 +67,16 @@ this is the primary dev/test target.
    (`overlay/`). layer-shell is the only way to get an always-on-top, anchored,
    click-through Wayland overlay; Slint can't. The main app spawns it on
    `Recording` and kills it on `Idle` (see `src/overlay.rs`).
+   - **`Layer::Overlay` is the top layer-shell layer, but it is not truly
+     "always on top."** Other overlay-layer windows (notably always-on-top IDEs
+     like cmux) share that same KWin layer, and KWin restacks *within* a layer on
+     raise — so clicking into such a window puts it above our pill. The protocol
+     gives a client no way to prevent this. The fix lives compositor-side: a tiny
+     KWin script (`packaging/kwin/fluidsiren-overlay-ontop/`) polls while the
+     overlay exists and re-raises it. Reacting to `windowActivated` alone loses,
+     because KWin raises the activated window *after* emitting the signal.
+     `install.sh` installs + enables it (KDE-only, best-effort). Note KWin's
+     `ScriptTimer` has no `isActive()` — track the running state yourself.
 
 3. **KDE GlobalShortcuts portal will not auto-bind a key** (security: the user is
    meant to bind it in System Settings). We bypass that with kglobalaccel's

@@ -45,6 +45,33 @@ sed "s|^Exec=.*|Exec=$bindir/fluidsiren|" packaging/dev.altic.FluidSiren.desktop
 update-desktop-database "$appsdir" 2>/dev/null || true
 echo "==> Installed desktop entry to $appsdir"
 
+# Overlay keep-on-top (KDE/KWin). The recording overlay is a top-layer
+# wlr-layer-shell surface, but other overlay-layer windows (always-on-top IDEs
+# like cmux) share that layer and win the within-layer stacking when focused. A
+# small KWin script re-raises the overlay so it stays visible. Best-effort: only
+# meaningful under KWin, and never fatal to the install.
+kwin_script_src="$here/packaging/kwin/fluidsiren-overlay-ontop"
+qbin="$(command -v qdbus6 || command -v qdbus || true)"
+if command -v kpackagetool6 >/dev/null 2>&1 && [[ -d "$kwin_script_src" ]]; then
+    if kpackagetool6 --type KWin/Script --install "$kwin_script_src" >/dev/null 2>&1 \
+        || kpackagetool6 --type KWin/Script --upgrade "$kwin_script_src" >/dev/null 2>&1; then
+        # Enable for future logins (KWin auto-loads enabled script plugins at start).
+        kwriteconfig6 --file kwinrc --group Plugins \
+            --key fluidsiren-overlay-ontopEnabled true 2>/dev/null || true
+        # Hot-load into the running session too, so it works without a relogin.
+        main_js="$HOME/.local/share/kwin/scripts/fluidsiren-overlay-ontop/contents/code/main.js"
+        if [[ -n "$qbin" ]] && "$qbin" org.kde.KWin /Scripting \
+            org.kde.kwin.Scripting.isScriptLoaded fluidsiren-overlay-ontop >/dev/null 2>&1; then
+            "$qbin" org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript \
+                fluidsiren-overlay-ontop >/dev/null 2>&1 || true
+            "$qbin" org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript \
+                "$main_js" fluidsiren-overlay-ontop >/dev/null 2>&1 || true
+            "$qbin" org.kde.KWin /Scripting org.kde.kwin.Scripting.start >/dev/null 2>&1 || true
+        fi
+        echo "==> Installed KWin overlay keep-on-top script"
+    fi
+fi
+
 if [[ "${ENABLE_AUTOSTART:-}" == "1" ]]; then
     mkdir -p "$HOME/.config/autostart"
     cp "$appsdir/dev.altic.FluidSiren.desktop" "$HOME/.config/autostart/"

@@ -1,0 +1,13 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Id": "fluidsiren-overlay-ontop",
+        "Name": "FluidSiren Overlay Keep-On-Top",
+        "Description": "Keeps the FluidSiren recording overlay above other overlay-layer windows (e.g. always-on-top IDEs).",
+        "Version": "1.0",
+        "License": "MIT",
+        "Authors": [{ "Name": "FluidSiren" }],
+        "EnabledByDefault": true
+    },
+    "X-Plasma-API": "javascript"
+}
