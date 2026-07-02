@@ -349,8 +349,9 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
 /// settings window's `ollama-running` property (drives the green/red status).
 ///
 /// Runs on its own thread with a small tokio runtime so the network probe never
-/// blocks the UI thread; it reloads config each tick so changing `ollama-url`
-/// re-points the probe. The thread exits with the process when the window closes.
+/// blocks the UI thread; it reloads config only when the file changes so changing
+/// `ollama-url` re-points the probe. The thread exits with the process when the
+/// window closes.
 fn spawn_ollama_probe(weak: slint::Weak<Settings>) {
     std::thread::Builder::new()
         .name("ollama-probe".into())
@@ -361,8 +362,16 @@ fn spawn_ollama_probe(weak: slint::Weak<Settings>) {
             else {
                 return;
             };
+            let mut last_mtime = None;
+            let mut cfg = Config::default();
             loop {
-                let cfg = Config::load().unwrap_or_default();
+                // Re-parse the config only when it changed; the network probe still
+                // runs every tick to keep the reachable status live.
+                let mtime = Config::config_mtime();
+                if mtime != last_mtime {
+                    last_mtime = mtime;
+                    cfg = Config::load().unwrap_or_default();
+                }
                 let reachable = rt.block_on(crate::enhance::is_available(&cfg));
                 // Bail out once the window is gone (process about to exit).
                 if weak

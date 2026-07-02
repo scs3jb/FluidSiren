@@ -81,6 +81,14 @@ impl Config {
         Ok(dirs()?.config_dir().join("config.toml"))
     }
 
+    /// Last-modified time of the config file, or `None` if it doesn't exist / can't
+    /// be stat'd. A cheap change check for the live-reload pollers, so they only
+    /// re-read and re-parse the file when it actually changed.
+    pub fn config_mtime() -> Option<std::time::SystemTime> {
+        let path = Self::config_path().ok()?;
+        std::fs::metadata(path).ok()?.modified().ok()
+    }
+
     /// Directory where downloaded ggml models live.
     pub fn models_dir() -> Result<PathBuf> {
         let dir = dirs()?.data_dir().join("models");

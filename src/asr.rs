@@ -53,12 +53,28 @@ async fn ensure_whisper_model(cfg: &Config) -> Result<std::path::PathBuf> {
     if !resp.status().is_success() {
         return Err(anyhow!("model download failed ({}): {}", resp.status(), url));
     }
-    let bytes = resp.bytes().await?;
+    // Stream to disk so the whole (hundreds of MB) model never sits in RAM.
     let tmp = path.with_extension("part");
-    tokio::fs::write(&tmp, &bytes).await?;
+    stream_to_file(resp, &tmp).await.with_context(|| format!("downloading {url}"))?;
     tokio::fs::rename(&tmp, &path).await?;
     eprintln!("Saved model to {}", path.display());
     Ok(path)
+}
+
+/// Stream an HTTP response body to `path` chunk-by-chunk so a large download never
+/// has to be held fully in memory. The caller renames/extracts afterward.
+pub(crate) async fn stream_to_file(resp: reqwest::Response, path: &Path) -> Result<()> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = tokio::fs::File::create(path).await.context("creating download file")?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("reading download chunk")?;
+        file.write_all(&chunk).await.context("writing download chunk")?;
+    }
+    file.flush().await.context("flushing download")?;
+    Ok(())
 }
 
 /// A loaded whisper model.

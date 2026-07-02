@@ -61,8 +61,8 @@ async fn ensure_model() -> Result<PathBuf> {
     if !resp.status().is_success() {
         return Err(anyhow!("Parakeet download failed: {}", resp.status()));
     }
-    let bytes = resp.bytes().await?;
-    tokio::fs::write(&archive, &bytes).await.context("writing Parakeet archive")?;
+    // Stream to disk to avoid holding the whole ~460 MB archive in RAM.
+    crate::asr::stream_to_file(resp, &archive).await.context("downloading Parakeet archive")?;
 
     eprintln!("Extracting Parakeet model...");
     let status = std::process::Command::new("tar")

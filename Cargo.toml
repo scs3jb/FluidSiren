@@ -25,6 +25,7 @@ cpal = "0.15"
 # when ksni makes a blocking call off the tokio runtime. This keeps zbus async-io only.
 ashpd = { version = "0.12", default-features = false, features = ["async-std"] }   # XDG GlobalShortcuts portal (KDE)
 evdev = "0.12"   # raw /dev/input push-to-talk fallback
+libc = "0.2"     # poll(2) so evdev readers wake to observe shutdown promptly
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process"] }
 futures-util = "0.3"

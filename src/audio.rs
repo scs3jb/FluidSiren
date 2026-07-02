@@ -48,8 +48,8 @@ impl Recorder {
 
     /// Stop capturing and return mono f32 samples resampled to 16 kHz.
     pub fn stop(self) -> Vec<f32> {
-        drop(self.stream);
-        let mono = self.buffer.lock().unwrap().clone();
+        drop(self.stream); // no more writers, so the buffer can be moved out
+        let mono = std::mem::take(&mut *self.buffer.lock().unwrap());
         resample_linear(&mono, self.src_rate, WHISPER_SAMPLE_RATE)
     }
 }

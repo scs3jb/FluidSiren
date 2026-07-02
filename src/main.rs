@@ -159,8 +159,15 @@ fn spawn_hotkey_watcher(engine: DictationEngine, cfg: Arc<Mutex<Config>>) {
         .spawn(move || {
             let mut current = cfg.lock().unwrap().clone();
             let mut _handle = spawn_hotkey(&engine, &current);
+            let mut last_mtime = Config::config_mtime();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
+                // Skip the read+parse unless the file actually changed on disk.
+                let mtime = Config::config_mtime();
+                if mtime == last_mtime {
+                    continue;
+                }
+                last_mtime = mtime;
                 let Ok(latest) = Config::load() else { continue };
                 let changed = latest.hotkey_key != current.hotkey_key
                     || latest.hotkey_mode != current.hotkey_mode

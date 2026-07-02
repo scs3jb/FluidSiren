@@ -140,8 +140,8 @@ impl HotkeyHandle {
 impl Drop for HotkeyHandle {
     fn drop(&mut self) {
         // Best-effort: detach rather than block on drop. The controller thread
-        // observes `running == false` and exits; evdev reader threads exit after
-        // their next event (blocking reads can't be interrupted portably).
+        // observes `running == false`, joins its evdev reader threads (each of
+        // which wakes from its poll within ~250ms) and exits on its own.
         self.signal_stop();
     }
 }
@@ -393,10 +393,13 @@ fn run_evdev(
 
     // Find devices that can emit our key. Reading /dev/input needs `input` group
     // membership (or root); enumerate() silently skips devices we can't open.
-    let mut readers = 0usize;
     // Shared recording flag for toggle mode, shared across all device threads so
     // pressing the key on any keyboard toggles the same state.
     let recording = Arc::new(AtomicBool::new(false));
+    // Keep the reader handles so we can join them on shutdown — otherwise a rebind
+    // (which drops the old handle and spawns a fresh listener) would leak the old
+    // readers.
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
     for (path, device) in evdev::enumerate() {
         let supports = device
@@ -415,26 +418,29 @@ fn run_evdev(
             .name("hotkey-evdev".into())
             .spawn(move || evdev_reader(shared, engine, mode, key, recording, device));
         match spawn_res {
-            Ok(_) => {
+            Ok(h) => {
                 tracing::info!("evdev hotkey: watching {} for {:?}", path_dbg.display(), key);
-                readers += 1;
+                handles.push(h);
             }
             Err(e) => tracing::warn!("evdev: could not spawn reader for {}: {e}", path_dbg.display()),
         }
     }
 
-    if readers == 0 {
+    if handles.is_empty() {
         return Err(anyhow!(
             "no readable input device exposes {key_name}. Add yourself to the 'input' group \
              (sudo usermod -aG input $USER) and re-login, or pick a key your keyboard has."
         ));
     }
 
-    // Park the controller thread until shutdown is requested. The detached
-    // reader threads do the real work; they exit after their next event once
-    // `running` is false.
+    // Park the controller thread until shutdown is requested. The reader threads do
+    // the real work; each observes `running == false` within one poll timeout.
     while shared.running.load(Ordering::SeqCst) {
         std::thread::park_timeout(std::time::Duration::from_millis(250));
+    }
+    // Reap every reader so none outlives this listener (e.g. across a rebind).
+    for h in handles {
+        let _ = h.join();
     }
     Ok(())
 }
@@ -620,8 +626,12 @@ fn qt_base_key(key: &str) -> Option<i32> {
     })
 }
 
-/// Per-device blocking read loop. `fetch_events` blocks until input arrives, so
-/// each device gets its own thread.
+/// Per-device read loop, one thread per device. `fetch_events` is a *blocking*
+/// read that can't be interrupted, so a naive loop would strand this thread until
+/// the next keystroke — leaking it across a hotkey rebind and letting a stale
+/// binding fire once more. Instead we `poll(2)` the device fd with a timeout and
+/// only read when it's actually readable, so the loop re-checks `running` at least
+/// every `POLL_TIMEOUT_MS` and exits promptly on shutdown.
 fn evdev_reader(
     shared: Arc<Shared>,
     engine: DictationEngine,
@@ -631,13 +641,44 @@ fn evdev_reader(
     mut device: evdev::Device,
 ) {
     use evdev::InputEventKind;
+    use std::os::unix::io::AsRawFd;
+
+    // How long a poll blocks before we loop back to re-check `running`. Also the
+    // worst-case shutdown latency for this reader.
+    const POLL_TIMEOUT_MS: libc::c_int = 250;
+    let fd = device.as_raw_fd();
 
     while shared.running.load(Ordering::SeqCst) {
+        // Wait for input OR the timeout. This keeps the fd blocking (we only call
+        // fetch_events once poll reports it readable) while never stranding the
+        // thread past a shutdown request.
+        let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let ret = unsafe { libc::poll(&mut pfd, 1, POLL_TIMEOUT_MS) };
+        if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue; // EINTR — re-check running and poll again
+            }
+            tracing::warn!("evdev: poll error, dropping reader: {err}");
+            return;
+        }
+        if ret == 0 {
+            continue; // timeout — loop re-checks `running`
+        }
+        // A device unplugged mid-read surfaces as POLLHUP/POLLERR; stop cleanly
+        // instead of spinning (poll would return those flags immediately forever).
+        if pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            tracing::warn!("evdev: device gone (poll revents {}), dropping reader", pfd.revents);
+            return;
+        }
+        if pfd.revents & libc::POLLIN == 0 {
+            continue;
+        }
+
         let events = match device.fetch_events() {
             Ok(ev) => ev,
             Err(e) => {
-                // EAGAIN shouldn't happen on a blocking fd, but a device can be
-                // unplugged. Log once and stop reading this device.
+                // A device can be unplugged between poll and read. Log and stop.
                 tracing::warn!("evdev: device read error, dropping reader: {e}");
                 return;
             }

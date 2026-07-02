@@ -7,7 +7,23 @@
 
 use crate::config::Config;
 use serde::Deserialize;
+use std::sync::OnceLock;
 use std::time::Duration;
+
+/// One process-wide HTTP client so the connection pool and TLS config are reused
+/// across every Ollama call instead of being rebuilt (and thrown away) per
+/// request. Only the connect timeout is fixed here; each call sets its own overall
+/// budget with `RequestBuilder::timeout`. Building a rustls client is effectively
+/// infallible, so a failure here is a broken environment, not a runtime condition.
+fn http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .expect("building shared HTTP client")
+    })
+}
 
 /// How long to wait for a TCP connection to Ollama before giving up. Kept short
 /// so a missing/down server fails fast instead of stalling dictation.
@@ -90,12 +106,6 @@ pub async fn maybe_enhance(cfg: &Config, text: String) -> String {
 async fn enhance_inner(cfg: &Config, text: &str) -> anyhow::Result<String> {
     use anyhow::Context;
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .context("building HTTP client")?;
-
     // Wrap the transcript in explicit markers so the model treats it as data to
     // clean, not a prompt to obey. (The markers are stripped by the model; we also
     // defend against echoed markers in `clean_output`.)
@@ -113,9 +123,10 @@ async fn enhance_inner(cfg: &Config, text: &str) -> anyhow::Result<String> {
         options: Options { temperature: 0.0 },
     };
 
-    let resp = client
+    let resp = http()
         .post(&url)
         .json(&body)
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .with_context(|| format!("POST {url}"))?;
@@ -242,12 +253,6 @@ pub async fn warm_up(cfg: &Config) -> anyhow::Result<()> {
     if !cfg.enhance {
         return Ok(());
     }
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(WARMUP_TIMEOUT)
-        .build()
-        .context("building HTTP client")?;
-
     let url = format!("{}/api/generate", cfg.ollama_url.trim_end_matches('/'));
     let body = GenerateRequest {
         model: &cfg.ollama_model,
@@ -257,9 +262,10 @@ pub async fn warm_up(cfg: &Config) -> anyhow::Result<()> {
         keep_alive: &cfg.ollama_keep_alive,
         options: Options { temperature: 0.0 },
     };
-    let resp = client
+    let resp = http()
         .post(&url)
         .json(&body)
+        .timeout(WARMUP_TIMEOUT)
         .send()
         .await
         .with_context(|| format!("POST {url}"))?;
@@ -276,12 +282,8 @@ pub async fn warm_up(cfg: &Config) -> anyhow::Result<()> {
 /// performs its own graceful fallback.
 pub async fn is_available(cfg: &Config) -> bool {
     async fn probe(cfg: &Config) -> anyhow::Result<bool> {
-        let client = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(PROBE_TIMEOUT)
-            .build()?;
         let url = format!("{}/api/tags", cfg.ollama_url.trim_end_matches('/'));
-        let resp = client.get(&url).send().await?;
+        let resp = http().get(&url).timeout(PROBE_TIMEOUT).send().await?;
         Ok(resp.status().is_success())
     }
 
