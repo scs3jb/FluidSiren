@@ -3,8 +3,8 @@
 #
 # Usage:
 #   scripts/uninstall.sh            # remove the app; keep your config + downloaded models
-#   scripts/uninstall.sh --purge    # also remove config, downloaded models, and the
-#                                    # FluidSiren Ollama user service (ollama itself is kept)
+#   scripts/uninstall.sh --purge    # also remove config, downloaded models, and Ollama
+#                                    # (its user service, rootless ~/.local install, and models)
 #   scripts/uninstall.sh --purge -y # purge without the confirmation prompt
 set -euo pipefail
 
@@ -58,29 +58,53 @@ update-desktop-database "$appsdir" 2>/dev/null || true
 rm -f "$autostart"
 echo "==> Removed binaries, bundled libs, desktop entry, and autostart"
 
-# 4. --purge: user data + the FluidSiren Ollama user service.
+# 4. --purge: user data (config + models) and Ollama.
 if (( purge )); then
     if (( ! assume_yes )); then
         echo
         echo "--purge will also delete:"
         echo "  • config:  $cfgdir"
-        echo "  • models:  $datadir  (downloaded models — can be several GB)"
-        echo "  • the FluidSiren Ollama user service (the ollama binary + its models are kept)"
+        echo "  • models:  $datadir  (downloaded speech models — can be several GB)"
+        echo "  • Ollama:  the FluidSiren user service, the rootless install in ~/.local,"
+        echo "             and all Ollama models/data in ~/.ollama (can be many GB)."
+        echo "             A system-wide Ollama (in /usr) is left for you to remove with sudo."
         read -r -p "Proceed? [y/N] " ans
         [[ "$ans" == [yY]* ]] || { echo "Purge aborted — the app is still uninstalled."; exit 0; }
     fi
 
-    # Only touch the Ollama user unit if it's the one setup-ollama.sh wrote for us.
+    # --- Ollama (what setup-ollama.sh may have set up) ---
+    # 1. The user service, only if it's the one setup-ollama.sh wrote for us.
     ollama_unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ollama.service"
     if [[ -f "$ollama_unit" ]] && grep -q FluidSiren "$ollama_unit"; then
         systemctl --user disable --now ollama >/dev/null 2>&1 || true
         rm -f "$ollama_unit"
         systemctl --user daemon-reload >/dev/null 2>&1 || true
-        echo "==> Removed the FluidSiren Ollama user service (ollama binary + models kept)"
+        echo "==> Removed the FluidSiren Ollama user service"
+    fi
+    # 2. The rootless install setup-ollama.sh --user unpacks into ~/.local. Stop a
+    #    stray server started from there first (targeted so a system ollama is safe).
+    pkill -f "$HOME/.local/bin/ollama" >/dev/null 2>&1 || true
+    if [[ -e "$HOME/.local/bin/ollama" || -d "$HOME/.local/lib/ollama" ]]; then
+        rm -f "$HOME/.local/bin/ollama"
+        rm -rf "$HOME/.local/lib/ollama"
+        echo "==> Removed the rootless Ollama install (~/.local/bin/ollama, ~/.local/lib/ollama)"
+    fi
+    # 3. Ollama models + data (respects a custom $OLLAMA_MODELS location).
+    ollama_data="${OLLAMA_MODELS:-$HOME/.ollama}"
+    if [[ -d "$ollama_data" ]]; then
+        rm -rf "$ollama_data"
+        echo "==> Removed Ollama models and data ($ollama_data)"
+    fi
+    # 4. A system-wide Ollama needs root — we can't remove it here, so point the way.
+    sys_ollama="$(command -v ollama 2>/dev/null || true)"
+    if [[ -n "$sys_ollama" ]]; then
+        echo "!!  A system Ollama is still installed at $sys_ollama. To remove it:"
+        echo "      sudo systemctl disable --now ollama 2>/dev/null; sudo rm -f \"$sys_ollama\""
+        echo "    (and 'sudo userdel ollama' if the official installer created that user)."
     fi
 
     rm -rf "$cfgdir" "$datadir"
-    echo "==> Purged config and downloaded models"
+    echo "==> Purged config and downloaded speech models"
 fi
 
 cat <<EOF
@@ -89,12 +113,11 @@ FluidSiren uninstalled.
 EOF
 if (( ! purge )); then
     cat <<EOF
-  • Kept your config ($cfgdir) and downloaded models ($datadir).
+  • Kept your config ($cfgdir), downloaded models ($datadir), and Ollama.
     Re-run with --purge to remove those too.
 EOF
 fi
 cat <<EOF
-  • Ollama (if you set it up) was left installed; remove it separately if you like.
   • If you added yourself to the 'input' group for the evdev hotkey, that's a
     system change this script doesn't touch: sudo gpasswd -d \$USER input to undo.
 EOF
