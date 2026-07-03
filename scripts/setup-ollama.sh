@@ -63,10 +63,21 @@ if [[ "$mode" == "user" ]]; then
         esac
         echo "==> Installing ollama into ~/.local (rootless)…"
         mkdir -p "$HOME/.local"
-        tmp="$(mktemp)"
-        curl -fsSL "https://ollama.com/download/ollama-linux-${arch}.tgz" -o "$tmp"
-        tar -C "$HOME/.local" -xzf "$tmp"
-        rm -f "$tmp"
+        # Ollama now ships a zstd tarball (ollama-linux-<arch>.tar.zst); the old
+        # .tgz is only published for legacy versions. Prefer .tar.zst, fall back to
+        # .tgz. Both extract bin/ollama + lib/ollama/ into ~/.local. (Streamed so we
+        # never stage the whole ~GB archive on disk.)
+        base="https://ollama.com/download/ollama-linux-${arch}"
+        if curl -fsSL --head "${base}.tar.zst" >/dev/null 2>&1; then
+            if ! command -v zstd >/dev/null 2>&1; then
+                echo "!!  ollama's download needs 'zstd' to extract. Install it and re-run:" >&2
+                echo "      Arch: sudo pacman -S zstd   Debian/Ubuntu: sudo apt-get install zstd" >&2
+                exit 1
+            fi
+            curl -fSL --progress-bar "${base}.tar.zst" | zstd -d | tar -xf - -C "$HOME/.local"
+        else
+            curl -fSL --progress-bar "${base}.tgz" | tar -xzf - -C "$HOME/.local"
+        fi
         bin="$HOME/.local/bin/ollama"
         echo "==> Installed $bin"
         case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *)
