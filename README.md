@@ -32,7 +32,8 @@ On first run it downloads a Whisper model (`base.en`, ~142 MB) to
 `~/.local/share/fluidsiren/models/`. Config is `~/.config/fluidsiren/config.toml`.
 
 To uninstall, run [`scripts/uninstall.sh`](scripts/uninstall.sh) (add `--purge`
-to also remove the config, downloaded models, and Ollama).
+to also remove the config, downloaded models, and Ollama; add `--keep-config`
+alongside `--purge` to remove everything but keep `~/.config/fluidsiren`).
 
 ### The hotkey
 

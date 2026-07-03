@@ -2,19 +2,21 @@
 # FluidSiren user-local uninstaller — reverses scripts/install.sh (no sudo).
 #
 # Usage:
-#   scripts/uninstall.sh            # remove the app; keep your config + downloaded models
-#   scripts/uninstall.sh --purge    # also remove config, downloaded models, and Ollama
-#                                    # (its user service, rootless ~/.local install, and models)
-#   scripts/uninstall.sh --purge -y # purge without the confirmation prompt
+#   scripts/uninstall.sh                     # remove the app; keep config + downloaded models
+#   scripts/uninstall.sh --purge             # also remove config, models, and Ollama
+#   scripts/uninstall.sh --purge --keep-config  # purge, but keep ~/.config/fluidsiren
+#   scripts/uninstall.sh --purge -y          # purge without the confirmation prompt
 set -euo pipefail
 
 purge=0
 assume_yes=0
+keep_config=0
 for a in "$@"; do
     case "$a" in
-        --purge)   purge=1 ;;
-        -y|--yes)  assume_yes=1 ;;
-        -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --purge)       purge=1 ;;
+        --keep-config) keep_config=1 ;;
+        -y|--yes)      assume_yes=1 ;;
+        -h|--help)     sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $a (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -63,7 +65,11 @@ if (( purge )); then
     if (( ! assume_yes )); then
         echo
         echo "--purge will also delete:"
-        echo "  • config:  $cfgdir"
+        if (( keep_config )); then
+            echo "  • config:  KEPT ($cfgdir)"
+        else
+            echo "  • config:  $cfgdir"
+        fi
         echo "  • models:  $datadir  (downloaded speech models — can be several GB)"
         echo "  • Ollama:  the FluidSiren user service, the rootless install in ~/.local,"
         echo "             and all Ollama models/data in ~/.ollama (can be many GB)."
@@ -103,8 +109,13 @@ if (( purge )); then
         echo "    (and 'sudo userdel ollama' if the official installer created that user)."
     fi
 
-    rm -rf "$cfgdir" "$datadir"
-    echo "==> Purged config and downloaded speech models"
+    rm -rf "$datadir"
+    if (( keep_config )); then
+        echo "==> Purged downloaded speech models (kept config: $cfgdir)"
+    else
+        rm -rf "$cfgdir"
+        echo "==> Purged config and downloaded speech models"
+    fi
 fi
 
 cat <<EOF
