@@ -31,6 +31,9 @@ entry (required for the hotkey portal). For a system package on Arch, see
 On first run it downloads a Whisper model (`base.en`, ~142 MB) to
 `~/.local/share/fluidsiren/models/`. Config is `~/.config/fluidsiren/config.toml`.
 
+To uninstall, run [`scripts/uninstall.sh`](scripts/uninstall.sh) (add `--purge`
+to also remove the config and downloaded models).
+
 ### The hotkey
 
 FluidSiren **self-binds your hotkey on startup** (default **F12**) through KDE's
