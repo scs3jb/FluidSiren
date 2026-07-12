@@ -1,0 +1,6 @@
+# Build/install manifest for /jb:build-install
+BUILD=cargo build --release
+VERIFY=test -x target/release/fluidsiren && test -x target/release/fluidsiren-overlay
+INSTALL=bash scripts/install.sh
+RUNNING_CHECK=pgrep -x fluidsiren
+VERSION_FILE=Cargo.toml
