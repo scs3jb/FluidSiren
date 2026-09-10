@@ -4,3 +4,20 @@
 # installer / PKGBUILD copy those .so files alongside the binary.
 [build]
 rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN:$ORIGIN/../lib/fluidsiren"]
+
+# whisper-rs-sys 0.13 pins bindgen 0.71, which mis-generates every struct that
+# holds an anonymous member when it links libclang 22: whisper_full_params comes
+# out as a 1-byte placeholder while the generated size assertion still demands
+# the real 264 bytes, so the crate fails to compile with
+#   error[E0080]: attempt to compute `1_usize - 264_usize`, which would overflow
+# clang 22 arrived on Arch as a blender dependency and took over
+# /usr/lib/libclang.so, which is what bindgen picks by default. Point it at
+# libclang 21 instead. Set here rather than in a build script so cargo test,
+# cargo check and rust-analyzer get it too, not just cargo build.
+#
+# Needs clang21 installed (setup-scripts installs it). Without that library the
+# build stops with "Unable to find libclang ... set the LIBCLANG_PATH
+# environment variable" — clang-sys does not fall back to another version.
+# Remove this once whisper-rs moves to a release built on bindgen 0.72+.
+[env]
+LIBCLANG_PATH = "/usr/lib/llvm21/lib"

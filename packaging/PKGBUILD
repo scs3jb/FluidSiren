@@ -7,7 +7,9 @@ arch=('x86_64')
 url="https://github.com/scs3jb/FluidSiren"
 license=('GPL-3.0-only')
 depends=('gtk4' 'gtk4-layer-shell' 'pipewire' 'ydotool')
-makedepends=('rust' 'cargo' 'cmake' 'gcc')
+# clang21: .cargo/config.toml points bindgen at libclang 21; bindgen 0.71
+# (pinned by whisper-rs-sys 0.13) mis-generates structs against libclang 22.
+makedepends=('rust' 'cargo' 'cmake' 'gcc' 'clang21')
 optdepends=('ollama: local LLM transcript cleanup')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
