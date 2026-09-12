@@ -392,7 +392,65 @@ fn run_evdev(
         .ok_or_else(|| anyhow!("evdev can't grab key '{}' (use the portal backend)", sc.key))?;
 
     // Find devices that can emit our key. Reading /dev/input needs `input` group
-    // membership (or root); enumerate() silently skips devices we can't open.
+    // membership (or root). We enumerate /dev/input ourselves rather than using
+    // evdev::enumerate(), which silently drops devices it cannot open — that hides
+    // a *partial* grab, which is worse than no grab at all: we would listen on some
+    // devices and miss the keyboard the user actually types on.
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir("/dev/input")
+        .map_err(|e| anyhow!("read /dev/input: {e}"))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("event"))
+        })
+        .collect();
+    paths.sort();
+
+    let mut matched: Vec<(std::path::PathBuf, evdev::Device)> = Vec::new();
+    let mut unreadable: Vec<std::path::PathBuf> = Vec::new();
+    for path in paths {
+        match evdev::Device::open(&path) {
+            Ok(device) => {
+                let supports = device
+                    .supported_keys()
+                    .map(|keys| keys.contains(key))
+                    .unwrap_or(false);
+                if supports {
+                    matched.push((path, device));
+                }
+            }
+            Err(e) => {
+                // We cannot open it, but sysfs still tells us what it can emit, so
+                // we can spot a device the user types on that we would have missed.
+                if sysfs_advertises_key(&path, key) {
+                    unreadable.push(path.clone());
+                }
+                tracing::debug!("evdev: cannot open {}: {e}", path.display());
+            }
+        }
+    }
+
+    // Bail out on partial coverage so `Auto` falls back to the portal, which the
+    // compositor feeds from every device. This is not hypothetical: a YubiKey gets
+    // a uaccess ACL from logind and advertises the whole key range, so on a machine
+    // whose real keyboards are not readable it can be the *only* match.
+    if !unreadable.is_empty() {
+        let names: Vec<String> = unreadable
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        return Err(anyhow!(
+            "{} input device(s) that can emit {key_name} are not readable ({}); \
+             grabbing only the rest would miss the keyboard you type on. Add yourself \
+             to the 'input' group (sudo usermod -aG input $USER) and re-login for a \
+             direct hotkey.",
+            names.len(),
+            names.join(", ")
+        ));
+    }
+
     // Shared recording flag for toggle mode, shared across all device threads so
     // pressing the key on any keyboard toggles the same state.
     let recording = Arc::new(AtomicBool::new(false));
@@ -401,15 +459,7 @@ fn run_evdev(
     // readers.
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
-    for (path, device) in evdev::enumerate() {
-        let supports = device
-            .supported_keys()
-            .map(|keys| keys.contains(key))
-            .unwrap_or(false);
-        if !supports {
-            continue;
-        }
-
+    for (path, device) in matched {
         let shared = shared.clone();
         let engine = engine.clone();
         let recording = recording.clone();
@@ -443,6 +493,36 @@ fn run_evdev(
         let _ = h.join();
     }
     Ok(())
+}
+
+/// Does the device behind `/dev/input/eventN` advertise `key`?
+///
+/// Reads the sysfs key bitmap, which is world-readable, so this answers for
+/// devices we have no permission to open.
+fn sysfs_advertises_key(dev_path: &std::path::Path, key: evdev::Key) -> bool {
+    let Some(name) = dev_path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let caps = format!("/sys/class/input/{name}/device/capabilities/key");
+    match std::fs::read_to_string(caps) {
+        Ok(bitmap) => key_bitmap_contains(&bitmap, key.code()),
+        Err(_) => false,
+    }
+}
+
+/// Test one key code against a sysfs `capabilities/key` bitmap.
+///
+/// The kernel prints the bitmap as space-separated 64-bit hex words, most
+/// significant word first, so we index from the end.
+fn key_bitmap_contains(bitmap: &str, code: u16) -> bool {
+    let word = usize::from(code) / 64;
+    let bit = u32::from(code) % 64;
+    bitmap
+        .split_whitespace()
+        .rev()
+        .nth(word)
+        .and_then(|w| u64::from_str_radix(w, 16).ok())
+        .is_some_and(|v| (v >> bit) & 1 == 1)
 }
 
 /// A parsed hotkey: optional modifiers + a base key (uppercased name, e.g. "F12",
@@ -760,6 +840,25 @@ mod tests {
     }
     fn qt(s: &str) -> i32 {
         qt_keycode(&Shortcut::parse(s).unwrap()).unwrap()
+    }
+
+    // Real sysfs `capabilities/key` bitmaps, copied off a live machine.
+    const YUBIKEY: &str = "e080ffdf01cfffff fffffffffffffffe";
+    const STREAM_DECK: &str = "1000000000000 0 0 0";
+
+    #[test]
+    fn key_bitmap_decodes_sysfs_words() {
+        use evdev::Key;
+        // A YubiKey is a HID keyboard: it claims F12 and the whole letter range,
+        // which is why it can look like the only keyboard on the machine.
+        assert!(key_bitmap_contains(YUBIKEY, Key::KEY_F12.code()));
+        assert!(key_bitmap_contains(YUBIKEY, Key::KEY_A.code()));
+        // A Stream Deck claims one key and nothing else.
+        assert!(!key_bitmap_contains(STREAM_DECK, Key::KEY_F12.code()));
+        // Codes past the end of the bitmap are absent, not a panic.
+        assert!(!key_bitmap_contains(STREAM_DECK, 700));
+        assert!(!key_bitmap_contains("", Key::KEY_F12.code()));
+        assert!(!key_bitmap_contains("zzz", Key::KEY_F12.code()));
     }
 
     #[test]
