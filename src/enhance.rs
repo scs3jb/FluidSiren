@@ -58,6 +58,11 @@ Output ONLY the cleaned text, with no preamble, no quotes, and no markdown.";
 #[derive(serde::Serialize)]
 struct Options {
     temperature: f32,
+    /// Cap on generated tokens. Cleanup output is about as long as the input, so
+    /// a runaway "assistant" answer is cut off early instead of eating the whole
+    /// request budget. `None` for the load-only warm-up request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_predict: Option<u32>,
 }
 
 /// Request body for Ollama's `/api/generate` endpoint (non-streaming).
@@ -70,6 +75,11 @@ struct GenerateRequest<'a> {
     /// How long to keep the model loaded after this request (e.g. "30m", "-1").
     /// Keeping it resident avoids a slow cold-reload on the next dictation.
     keep_alive: &'a str,
+    /// `Some(false)` turns off the reasoning phase of thinking models (qwen3,
+    /// deepseek-r1, …), which otherwise adds seconds of hidden tokens before the
+    /// cleaned text. Omitted for other models, which don't accept the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
     options: Options,
 }
 
@@ -110,8 +120,9 @@ async fn enhance_inner(cfg: &Config, text: &str) -> anyhow::Result<String> {
     // clean, not a prompt to obey. (The markers are stripped by the model; we also
     // defend against echoed markers in `clean_output`.)
     let delimited = format!(
-        "Clean up the transcript between the <<<TRANSCRIPT>>> markers and output \
-         only the cleaned text.\n<<<TRANSCRIPT>>>\n{text}\n<<<END>>>"
+        "{}Clean up the transcript between the <<<TRANSCRIPT>>> markers and output \
+         only the cleaned text.\n<<<TRANSCRIPT>>>\n{text}\n<<<END>>>",
+        vocabulary_hint(&cfg.vocabulary)
     );
     let url = format!("{}/api/generate", cfg.ollama_url.trim_end_matches('/'));
     let body = GenerateRequest {
@@ -120,7 +131,8 @@ async fn enhance_inner(cfg: &Config, text: &str) -> anyhow::Result<String> {
         system: SYSTEM_PROMPT,
         stream: false,
         keep_alive: &cfg.ollama_keep_alive,
-        options: Options { temperature: 0.0 },
+        think: thinking_model(&cfg.ollama_model).then_some(false),
+        options: Options { temperature: 0.0, num_predict: Some(max_output_tokens(text)) },
     };
 
     let resp = http()
@@ -155,6 +167,34 @@ async fn enhance_inner(cfg: &Config, text: &str) -> anyhow::Result<String> {
     }
 
     Ok(cleaned)
+}
+
+/// Prompt line listing the user's preferred spellings, or empty.
+fn vocabulary_hint(words: &[String]) -> String {
+    let words: Vec<&str> = words.iter().map(|w| w.trim()).filter(|w| !w.is_empty()).collect();
+    if words.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "If the transcript contains a misheard form of any of these terms, use this exact \
+             spelling: {}.\n",
+            words.join(", ")
+        )
+    }
+}
+
+/// Models with a reasoning phase that Ollama can switch off via `think: false`.
+fn thinking_model(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    ["qwen3", "deepseek-r1", "magistral", "phi4-reasoning", "phi4-mini-reasoning"]
+        .iter()
+        .any(|family| m.starts_with(family))
+}
+
+/// Generation cap for a cleanup of `text`: generous for real cleanups (roughly
+/// 1.3 tokens per word, doubled), small enough to stop a model that is answering.
+fn max_output_tokens(text: &str) -> u32 {
+    (words(text).len() as u32 * 3).max(32) + 32
 }
 
 /// Heuristic gate distinguishing a genuine cleanup from the model answering or
@@ -260,7 +300,8 @@ pub async fn warm_up(cfg: &Config) -> anyhow::Result<()> {
         system: "",
         stream: false,
         keep_alive: &cfg.ollama_keep_alive,
-        options: Options { temperature: 0.0 },
+        think: None,
+        options: Options { temperature: 0.0, num_predict: None },
     };
     let resp = http()
         .post(&url)
@@ -381,6 +422,21 @@ mod tests {
             "remind me to call the dentist tomorrow",
             "Sure! I've noted a reminder for you to call the dentist. Is there anything else you need help with today?"
         ));
+    }
+
+    #[test]
+    fn thinking_is_disabled_only_for_reasoning_models() {
+        assert!(thinking_model("qwen3:4b"));
+        assert!(thinking_model("qwen3.5:2b"));
+        assert!(!thinking_model("llama3.2:3b"));
+        assert!(!thinking_model("gemma3n:e2b"));
+    }
+
+    #[test]
+    fn vocabulary_hint_lists_terms() {
+        assert_eq!(vocabulary_hint(&[]), "");
+        let hint = vocabulary_hint(&["Kubernetes".into(), "FluidSiren".into()]);
+        assert!(hint.contains("Kubernetes, FluidSiren"));
     }
 
     #[test]

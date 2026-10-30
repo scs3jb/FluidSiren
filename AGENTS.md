@@ -18,8 +18,11 @@ recording overlay round it out. Everything runs locally.
 src/
   main.rs        binary entry; arg modes (--file, --seconds, --settings); UI-mode wiring
   engine.rs      DictationEngine — actor thread owning the cpal stream + whisper ctx;
-                 capture→transcribe→enhance→inject pipeline; Clone+Send handle
-  audio.rs       cpal capture + resample to 16 kHz mono; --file/--seconds helpers
+                 capture→transcribe→enhance→inject pipeline; Clone+Send handle;
+                 incremental (transcribe-while-recording) phrase segmentation
+  audio.rs       cpal capture + band-limited (polyphase sinc) resample to 16 kHz
+                 mono; --file/--seconds helpers
+  vad.rs         energy VAD: silence trim, no-speech skip, phrase-pause cut points
   asr.rs         Transcriber trait + Whisper provider (whisper-rs) + load_transcriber factory
   parakeet.rs    Parakeet TDT (NeMo) provider via sherpa-onnx (feature "parakeet", English)
   enhance.rs     Ollama cleanup pass (graceful fallback if absent)
@@ -45,6 +48,8 @@ cargo test --bin fluidsiren           # unit tests (enhance, …)
 
 # Headless test modes (no GUI; injection OFF unless --inject):
 ./target/release/fluidsiren --file clip.wav
+./target/release/fluidsiren --file a.wav b.wav …   # per-file "path<TAB>secs<TAB>text"
+./target/release/fluidsiren --file long.wav --live # replay via the incremental path
 ./target/release/fluidsiren --seconds 5
 ```
 
@@ -131,6 +136,11 @@ You usually have a live Wayland session. Useful tricks:
   `dev.altic.FluidSiren`.
 - Adding an ASR model = a new provider behind the engine's transcribe step; keep
   Whisper as the always-available default.
+- Accuracy/speed changes: measure, don't guess. Run a multi-file `--file` over a
+  set with reference transcripts (e.g. LibriSpeech clips, resampled to 48 kHz with
+  silence + noise added to mimic a real mic) before and after, and compare WER and
+  total time. Mic-rate audio matters: the capture path resamples, 16 kHz test
+  files skip it.
 - After a change: `cargo build --release` clean (no warnings), run the relevant
   `--file`/`--seconds`/`cargo test`, and for window/hotkey work verify via the KWin
   / kglobalshortcutsrc methods above. Flag anything that genuinely needs a human

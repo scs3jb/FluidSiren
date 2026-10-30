@@ -7,6 +7,10 @@ export component Settings inherits Window {
     in-out property <string> provider: "whisper";
     in-out property <string> whisper-model: "base.en";
     in-out property <string> language: "en";
+    in-out property <string> parakeet-model: "v2";
+    // Comma-separated names / jargon to prefer (Config::vocabulary).
+    in-out property <string> vocabulary: "";
+    in-out property <bool> incremental: true;
     in-out property <bool> enhance: false;
     in-out property <string> ollama-model: "llama3.2:3b";
     in-out property <string> ollama-url: "http://localhost:11434";
@@ -67,8 +71,20 @@ export component Settings inherits Window {
         }
         Text {
             text: root.provider == "parakeet"
-                ? "Parakeet TDT — fast, accurate English (~460 MB, downloads on first use)"
+                ? "Parakeet TDT — fastest and most accurate on CPU (~460-640 MB, downloads on first use)"
                 : "Whisper — multilingual; pick a ggml model below";
+            color: #6c7086;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+
+        if root.provider == "parakeet" : Text { text: "Parakeet model"; color: #a6adc8; font-size: 13px; }
+        if root.provider == "parakeet" : ComboBox {
+            model: ["v2", "v3"];
+            current-value <=> root.parakeet-model;
+        }
+        if root.provider == "parakeet" : Text {
+            text: "v2 = English (most accurate). v3 = 25 European languages, auto-detected. Restart to apply.";
             color: #6c7086;
             font-size: 11px;
             wrap: word-wrap;
@@ -77,7 +93,7 @@ export component Settings inherits Window {
         Text { text: "Whisper model"; color: #a6adc8; font-size: 13px; }
         // Quick-pick presets; selecting one writes the free-text field below.
         ComboBox {
-            model: ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"];
+            model: ["tiny.en", "base.en", "small.en", "medium.en", "large-v3-turbo-q5_0", "large-v3"];
             selected(value) => { root.whisper-model = value; }
         }
         LineEdit {
@@ -89,6 +105,23 @@ export component Settings inherits Window {
         LineEdit {
             text <=> root.language;
             placeholder-text: "en, auto, de, fr, …";
+        }
+
+        Text { text: "Vocabulary"; color: #a6adc8; font-size: 13px; }
+        LineEdit {
+            text <=> root.vocabulary;
+            placeholder-text: "Names and jargon, comma-separated (e.g. Kubernetes, Siobhan)";
+        }
+        Text {
+            text: "Preferred spellings. Biases Whisper and the Ollama cleanup pass.";
+            color: #6c7086;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+
+        CheckBox {
+            text: "Transcribe while I'm still talking (faster on long dictations)";
+            checked <=> root.incremental;
         }
 
         CheckBox {

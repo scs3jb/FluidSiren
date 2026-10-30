@@ -214,6 +214,15 @@ fn persist_settings(s: &Settings, cfg: &Arc<Mutex<Config>>) {
     c.provider = s.get_provider().to_string();
     c.whisper_model = s.get_whisper_model().to_string();
     c.language = s.get_language().to_string();
+    c.parakeet_model = s.get_parakeet_model().to_string();
+    c.vocabulary = s
+        .get_vocabulary()
+        .split(',')
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(String::from)
+        .collect();
+    c.incremental = s.get_incremental();
     c.enhance = s.get_enhance();
     c.ollama_model = s.get_ollama_model().to_string();
     c.ollama_url = s.get_ollama_url().to_string();
@@ -235,6 +244,9 @@ pub fn run_settings(cfg: Arc<Mutex<Config>>) -> anyhow::Result<()> {
         settings.set_provider(c.provider.clone().into());
         settings.set_whisper_model(c.whisper_model.clone().into());
         settings.set_language(c.language.clone().into());
+        settings.set_parakeet_model(c.parakeet_model.clone().into());
+        settings.set_vocabulary(c.vocabulary.join(", ").into());
+        settings.set_incremental(c.incremental);
         settings.set_enhance(c.enhance);
         settings.set_ollama_model(c.ollama_model.clone().into());
         settings.set_ollama_url(c.ollama_url.clone().into());

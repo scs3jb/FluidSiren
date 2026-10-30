@@ -81,6 +81,8 @@ installed side-by-side.
 ```bash
 ./target/release/fluidsiren --file clip.wav    # transcribe a WAV
 ./target/release/fluidsiren --seconds 5        # record 5s from the mic
+./target/release/fluidsiren --file a.wav b.wav   # several clips: path, seconds, text per line
+./target/release/fluidsiren --file long.wav --live   # replay through the incremental path
 # add --inject to actually type; or set FLUIDSIREN_NO_INJECT=1 to force-disable typing
 ```
 
@@ -91,7 +93,11 @@ installed side-by-side.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `provider` | `whisper` | `whisper` \| `parakeet` (switch in Settings; restart to apply) |
-| `whisper_model` | `base.en` | any whisper.cpp ggml name (`tiny.en`, `small.en`, `large-v3`, …) |
+| `whisper_model` | `base.en` | any whisper.cpp ggml name (`tiny.en`, `small.en`, `large-v3-turbo-q5_0`, …) |
+| `whisper_beam_size` | `1` | 1 = greedy; 5 = beam search |
+| `parakeet_model` | `v2` | `v2` (English) \| `v3` (25 European languages) |
+| `vocabulary` | `[]` | preferred spellings for names/jargon |
+| `incremental` | `true` | transcribe finished phrases while still recording |
 | `language` | `en` | or `auto` |
 | `enhance` | `false` | Ollama cleanup pass |
 | `ollama_model` / `ollama_url` | `llama3.2:3b` / `http://localhost:11434` | |
@@ -106,11 +112,53 @@ app picks up changes (enhancement, hotkey) live.
 
 FluidSiren is focused on **English** dictation, with two on-device providers:
 
-- **Whisper** (default) — `whisper.cpp`; `.en` models from `tiny.en` to `medium.en`
-  are fast and English-only, `large-v3` is the most accurate.
-- **Parakeet TDT 0.6B v2** — NVIDIA NeMo transducer via sherpa-onnx; very fast and
-  accurate for English. ~460 MB int8 model, downloaded on first use to
-  `~/.local/share/fluidsiren/models/`. Select **parakeet** in Settings.
+- **Parakeet TDT 0.6B** (recommended): an NVIDIA NeMo transducer run through
+  sherpa-onnx. On CPU it is about 4× faster than Whisper `base.en` and makes
+  about a third of the errors. Pick `parakeet_model`:
+  - `v2`: English, about 460 MB, the most accurate.
+  - `v3`: 25 European languages, auto-detected, about 640 MB.
+
+  The model downloads on first use to `~/.local/share/fluidsiren/models/`.
+  Select **parakeet** in Settings.
+- **Whisper** (the default provider, always built in): runs on `whisper.cpp`.
+  - The `.en` models (`tiny.en` to `medium.en`) are English-only.
+  - `large-v3-turbo-q5_0` is the best accuracy-to-size option, if you have a GPU.
+  - `large-v3` is the most accurate and the slowest.
+
+  Whisper encodes a fixed 30 s window, so even short clips cost the full window
+  on CPU.
+
+Measured on 73 LibriSpeech clips, resampled to 48 kHz with mic noise and
+leading/trailing silence added, on a 4-core CPU:
+
+| Model | WER | Time per clip |
+| --- | --- | --- |
+| Parakeet v2 | 3.6 % | 0.5 s |
+| Whisper `base.en` | 11.4 % | 2.0 s |
+| Whisper `small.en` | ~7 % (20-clip subset) | 7 s |
+
+The audio pipeline is shared by both providers:
+
+- **Band-limited resampling.** The mic's 44.1/48 kHz audio is low-passed before
+  it is decimated to 16 kHz, so hiss above 8 kHz doesn't alias into the speech
+  band.
+- **Silence trimming and a no-speech skip.** A lightweight VAD cuts the
+  hotkey-press silence. An empty recording never reaches the model, so Whisper
+  can't hallucinate "Thank you." from silence.
+- **Incremental transcription** (`incremental = true`). In long dictations,
+  each phrase is transcribed during the next pause while you keep talking, so
+  stopping only waits for the last phrase.
+- **Vocabulary** (`vocabulary = ["Kubernetes", "Siobhan"]`). Preferred
+  spellings for names and jargon. They feed Whisper's initial prompt and the
+  Ollama cleanup prompt.
+
+Other Whisper and Ollama settings:
+
+- Whisper decoding is greedy by default. `whisper_beam_size = 5` matches
+  whisper.cpp's CLI, but it measured no accuracy gain for about 15 % more time.
+- With Ollama cleanup, reasoning models such as `qwen3:4b` or `qwen3:1.7b`
+  are run with thinking disabled. That makes them low-latency alternatives to
+  `llama3.2:3b`.
 
 The transcriber is a small pluggable trait (`asr::Transcriber`), so adding a
 provider is straightforward. Build without Parakeet (smaller binary, no

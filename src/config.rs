@@ -14,6 +14,17 @@ pub struct Config {
     pub whisper_model: String,
     /// Language hint for whisper ("en", "auto", ...).
     pub language: String,
+    /// Whisper beam width. 1 = greedy (fastest); 5 matches whisper.cpp's CLI and
+    /// is a little more accurate at roughly 2× the decode time.
+    pub whisper_beam_size: u32,
+    /// Parakeet model: "v2" (English, most accurate) | "v3" (25 European languages).
+    pub parakeet_model: String,
+    /// Names, jargon and spellings to prefer. Biases Whisper (initial prompt) and
+    /// the Ollama cleanup pass.
+    pub vocabulary: Vec<String>,
+    /// Transcribe finished phrases while you're still talking, so stopping only
+    /// has to process the last phrase. Cuts post-dictation latency on long takes.
+    pub incremental: bool,
     /// Whether to run the Ollama enhancement pass (M3).
     pub enhance: bool,
     /// Ollama model used for enhancement.
@@ -38,6 +49,10 @@ impl Default for Config {
             provider: "whisper".to_string(),
             whisper_model: "base.en".to_string(),
             language: "en".to_string(),
+            whisper_beam_size: 1,
+            parakeet_model: "v2".to_string(),
+            vocabulary: Vec::new(),
+            incremental: true,
             enhance: false,
             ollama_model: "llama3.2:3b".to_string(),
             ollama_url: "http://localhost:11434".to_string(),

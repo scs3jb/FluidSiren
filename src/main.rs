@@ -18,6 +18,7 @@ mod overlay;
 mod parakeet;
 mod scope;
 mod ui;
+mod vad;
 
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -104,16 +105,30 @@ fn main() -> Result<()> {
         );
         match args.first().map(String::as_str) {
             Some("--file") => {
-                let path = args
-                    .get(1)
-                    .map(PathBuf::from)
-                    .ok_or_else(|| anyhow!("usage: fluidsiren --file <path.wav>"))?;
-                print_transcript(engine.process_blocking(audio::load_wav(&path)?));
+                // One or more clips; with several, each line is tagged with its
+                // file name and processing time, which doubles as a quick benchmark.
+                let paths: Vec<PathBuf> =
+                    args[1..].iter().filter(|a| !a.starts_with("--")).map(PathBuf::from).collect();
+                if paths.is_empty() {
+                    return Err(anyhow!("usage: fluidsiren --file <path.wav>..."));
+                }
+                // --live replays each clip through the incremental (while-recording) path.
+                let live = args.iter().any(|a| a == "--live");
+                for path in &paths {
+                    let audio = audio::load_wav(path)?;
+                    let started = std::time::Instant::now();
+                    let text = engine.process_blocking(audio, live);
+                    if paths.len() == 1 {
+                        print_transcript(text);
+                    } else {
+                        println!("{}\t{:.3}\t{text}", path.display(), started.elapsed().as_secs_f32());
+                    }
+                }
             }
             Some("--seconds") => {
                 let secs: f32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(5.0);
                 println!("Recording {secs}s from default mic...");
-                print_transcript(engine.process_blocking(audio::record_for(secs)?));
+                print_transcript(engine.process_blocking(audio::record_for(secs)?, false));
             }
             _ => {}
         }
