@@ -148,6 +148,9 @@ The audio pipeline is shared by both providers:
 - **Incremental transcription** (`incremental = true`). In long dictations,
   each phrase is transcribed during the next pause while you keep talking, so
   stopping only waits for the last phrase.
+  - On 40-95 s dictations with Parakeet, the wait after you release the
+    hotkey dropped from 3-10 s to 0.15-0.3 s.
+  - WER moved from 3.6 % to 3.9 %.
 - **Vocabulary** (`vocabulary = ["Kubernetes", "Siobhan"]`). Preferred
   spellings for names and jargon. They feed Whisper's initial prompt and the
   Ollama cleanup prompt.

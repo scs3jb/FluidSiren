@@ -1,0 +1,20 @@
+WARNING: ydotool not usable — transcripts will not be typed.
+Install ydotool + run ydotoold, and ensure /dev/uinput access.
+(test mode: injection disabled; pass --inject to type into the focused window)
+Error: opening wav
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: fluidsiren::audio::load_wav
+   1: fluidsiren::main
+   2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), anyhow::Error>, core::result::Result<(), anyhow::Error>>
+   3: std::rt::lang_start::<core::result::Result<(), anyhow::Error>>::{closure#0}
+   4: std::rt::lang_start_internal
+   5: main
+   6: __libc_start_call_main
+             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+   7: __libc_start_main_impl
+             at ./csu/../csu/libc-start.c:360:3
+   8: _start
